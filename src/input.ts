@@ -1,0 +1,501 @@
+export class Input {
+  constructor() {
+    this.down = new Set();
+    this.pressed = new Set();
+    this.gamepadIndex = null;
+
+    this.controlModeKey = 'smb_control_mode';
+    this.hasTouch = ('ontouchstart' in window) || ((navigator.maxTouchPoints ?? 0) > 0);
+    this.hasGyro = typeof window.DeviceOrientationEvent !== 'undefined';
+
+    this.touch = {
+      pointerId: null,
+      active: false,
+      centerX: 0,
+      centerY: 0,
+      value: { x: 0, y: 0 },
+    };
+
+    this.gyro = {
+      baselineSet: false,
+      baseBeta: 0,
+      baseGamma: 0,
+      value: { x: 0, y: 0 },
+    };
+
+    this.touchRoot = document.getElementById('touch-controls');
+    this.joystickEl = this.touchRoot?.querySelector?.('.joystick') ?? null;
+    this.joystickHandleEl = this.touchRoot?.querySelector?.('.joystick-handle') ?? null;
+
+    this.handlers = {
+      keydown: (event) => {
+        if (!this.down.has(event.code)) {
+          this.pressed.add(event.code);
+        }
+        this.down.add(event.code);
+      },
+      keyup: (event) => {
+        this.down.delete(event.code);
+      },
+
+      pointerdown: (event) => {
+        if (!this.hasTouch) {
+          return;
+        }
+        if (this.getControlMode() !== 'touch') {
+          return;
+        }
+        if (!this.isTouchLayerActive()) {
+          return;
+        }
+        if (this.touch.pointerId !== null) {
+          return;
+        }
+
+        event.preventDefault();
+        this.touch.pointerId = event.pointerId;
+        this.touch.active = true;
+        this.touch.centerX = event.clientX;
+        this.touch.centerY = event.clientY;
+        this.touch.value.x = 0;
+        this.touch.value.y = 0;
+
+        this.touchRoot?.setPointerCapture?.(event.pointerId);
+        this.showJoystickAt(event.clientX, event.clientY);
+        this.updateJoystickHandle(0, 0);
+      },
+
+      pointermove: (event) => {
+        if (!this.touch.active || event.pointerId !== this.touch.pointerId) {
+          return;
+        }
+        event.preventDefault();
+
+        const MAX_RADIUS = 55;
+        const dx = event.clientX - this.touch.centerX;
+        const dy = event.clientY - this.touch.centerY;
+        const dist = Math.hypot(dx, dy);
+        let nx = 0;
+        let ny = 0;
+        let px = dx;
+        let py = dy;
+
+        if (dist > 0) {
+          const clamped = Math.min(dist, MAX_RADIUS);
+          const s = clamped / dist;
+          px = dx * s;
+          py = dy * s;
+          nx = px / MAX_RADIUS;
+          ny = py / MAX_RADIUS;
+        }
+
+        this.touch.value.x = clamp(nx * 2, -1, 1);
+        this.touch.value.y = clamp(ny * 2, -1, 1);
+        this.updateJoystickHandle(px, py);
+      },
+
+      pointerup: (event) => {
+        if (event.pointerId === this.touch.pointerId) {
+          this.endTouch();
+        }
+      },
+
+      pointercancel: (event) => {
+        if (event.pointerId === this.touch.pointerId) {
+          this.endTouch();
+        }
+      },
+
+      deviceorientation: (event) => {
+        if (!this.hasGyro) {
+          return;
+        }
+        if (this.getControlMode() !== 'gyro') {
+          return;
+        }
+
+        const beta = typeof event.beta === 'number' ? event.beta : 0;
+        const gamma = typeof event.gamma === 'number' ? event.gamma : 0;
+
+        if (!this.gyro.baselineSet) {
+          this.gyro.baselineSet = true;
+          this.gyro.baseBeta = beta;
+          this.gyro.baseGamma = gamma;
+        }
+
+        const MAX_ANGLE = 25;
+        const x = (gamma - this.gyro.baseGamma) / MAX_ANGLE;
+        const y = (this.gyro.baseBeta - beta) / MAX_ANGLE;
+        this.gyro.value.x = clamp(x, -1, 1);
+        this.gyro.value.y = clamp(y, -1, 1);
+      },
+
+      gamepadconnected: (event) => {
+        if (this.gamepadIndex === null) {
+          this.gamepadIndex = event.gamepad.index;
+        }
+      },
+      gamepaddisconnected: (event) => {
+        if (event.gamepad.index === this.gamepadIndex) {
+          this.gamepadIndex = null;
+        }
+      },
+    };
+    window.addEventListener('keydown', this.handlers.keydown);
+    window.addEventListener('keyup', this.handlers.keyup);
+
+    if (this.hasTouch && this.touchRoot) {
+      this.touchRoot.addEventListener('pointerdown', this.handlers.pointerdown, { passive: false });
+      window.addEventListener('pointermove', this.handlers.pointermove, { passive: false });
+      window.addEventListener('pointerup', this.handlers.pointerup);
+      window.addEventListener('pointercancel', this.handlers.pointercancel);
+    }
+
+    if (this.hasGyro) {
+      window.addEventListener('deviceorientation', this.handlers.deviceorientation);
+    }
+
+    window.addEventListener('gamepadconnected', this.handlers.gamepadconnected);
+    window.addEventListener('gamepaddisconnected', this.handlers.gamepaddisconnected);
+  }
+
+  destroy() {
+    window.removeEventListener('keydown', this.handlers.keydown);
+    window.removeEventListener('keyup', this.handlers.keyup);
+
+    if (this.hasTouch && this.touchRoot) {
+      this.touchRoot.removeEventListener('pointerdown', this.handlers.pointerdown);
+      window.removeEventListener('pointermove', this.handlers.pointermove);
+      window.removeEventListener('pointerup', this.handlers.pointerup);
+      window.removeEventListener('pointercancel', this.handlers.pointercancel);
+    }
+
+    if (this.hasGyro) {
+      window.removeEventListener('deviceorientation', this.handlers.deviceorientation);
+    }
+
+    window.removeEventListener('gamepadconnected', this.handlers.gamepadconnected);
+    window.removeEventListener('gamepaddisconnected', this.handlers.gamepaddisconnected);
+  }
+
+  getControlMode() {
+    const raw = localStorage.getItem(this.controlModeKey);
+    if (raw === 'gyro' || raw === 'touch') {
+      return raw;
+    }
+    return this.hasTouch ? 'touch' : 'gyro';
+  }
+
+  isOverlayVisible() {
+    const overlay = document.getElementById('overlay');
+    if (!overlay) {
+      return false;
+    }
+    return !overlay.classList.contains('hidden');
+  }
+
+  isTouchLayerActive() {
+    if (!this.touchRoot) {
+      return false;
+    }
+    if (this.isOverlayVisible()) {
+      return false;
+    }
+    return true;
+  }
+
+  syncTouchLayer(mode) {
+    if (!this.touchRoot) {
+      return;
+    }
+
+    const shouldEnable = mode === 'touch' && this.hasTouch && !this.isOverlayVisible();
+    if (!shouldEnable) {
+      if (this.touch.active) {
+        this.endTouch();
+      }
+      this.touchRoot.classList.remove('active');
+      this.touchRoot.classList.add('hidden');
+      this.joystickEl?.classList.add('hidden');
+      return;
+    }
+
+    this.touchRoot.classList.remove('hidden');
+    this.touchRoot.classList.add('active');
+  }
+
+  showJoystickAt(x, y) {
+    if (!this.touchRoot || !this.joystickEl) {
+      return;
+    }
+    this.touchRoot.classList.add('active');
+    this.touchRoot.classList.remove('hidden');
+    this.joystickEl.classList.remove('hidden');
+    this.joystickEl.style.left = `${x}px`;
+    this.joystickEl.style.top = `${y}px`;
+  }
+
+  updateJoystickHandle(dx, dy) {
+    if (!this.joystickHandleEl) {
+      return;
+    }
+    this.joystickHandleEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+  }
+
+  hideJoystick() {
+    this.joystickEl?.classList.add('hidden');
+  }
+
+  endTouch() {
+    this.touch.active = false;
+    this.touch.pointerId = null;
+    this.touch.value.x = 0;
+    this.touch.value.y = 0;
+    this.hideJoystick();
+  }
+
+  isDown(code) {
+    return this.down.has(code);
+  }
+
+  wasPressed(code) {
+    if (this.pressed.has(code)) {
+      this.pressed.delete(code);
+      return true;
+    }
+    return false;
+  }
+
+  clearPressed() {
+    this.pressed.clear();
+  }
+
+  getActiveGamepad() {
+    const gamepads = navigator.getGamepads?.() ?? navigator.webkitGetGamepads?.();
+    if (!gamepads) {
+      return null;
+    }
+
+    if (this.gamepadIndex !== null) {
+      const candidate = gamepads[this.gamepadIndex];
+      if (candidate?.connected) {
+        return candidate;
+      }
+    }
+
+    for (const candidate of gamepads) {
+      if (candidate?.connected) {
+        this.gamepadIndex = candidate.index;
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
+  isPrimaryActionDown() {
+    if (this.isDown('Space') || this.isDown('Enter') || this.isDown('KeyZ')) {
+      return true;
+    }
+    const pad = this.getActiveGamepad();
+    if (!pad?.buttons?.length) {
+      return false;
+    }
+    const button = pad.buttons[0];
+    return !!button && (button.pressed || button.value > 0.5);
+  }
+
+  getGamepadStick() {
+    const gamepads = navigator.getGamepads?.() ?? navigator.webkitGetGamepads?.();
+    if (!gamepads) {
+      return null;
+    }
+
+    let pad = null;
+    if (this.gamepadIndex !== null) {
+      const candidate = gamepads[this.gamepadIndex];
+      if (candidate?.connected && candidate.axes.length >= 2) {
+        pad = candidate;
+      }
+    }
+
+    if (!pad) {
+      for (const candidate of gamepads) {
+        if (candidate?.connected && candidate.axes.length >= 2) {
+          pad = candidate;
+          this.gamepadIndex = candidate.index;
+          break;
+        }
+      }
+    }
+
+    if (!pad) {
+      return null;
+    }
+
+    const primary = readPadStick(pad);
+    if (primary.magnitudeSq > GAMEPAD_SWITCH_THRESHOLD) {
+      return primary.value;
+    }
+
+    let best = primary;
+    for (const candidate of gamepads) {
+      if (!candidate?.connected || candidate.axes.length < 2) {
+        continue;
+      }
+      const result = readPadStick(candidate);
+      if (result.magnitudeSq > best.magnitudeSq) {
+        best = result;
+        this.gamepadIndex = candidate.index;
+      }
+    }
+
+    return best.magnitudeSq > 0 ? best.value : null;
+  }
+
+  getStick() {
+    const mode = this.getControlMode();
+    this.syncTouchLayer(mode);
+    if (mode !== 'gyro') {
+      this.gyro.baselineSet = false;
+    }
+    if (mode === 'gyro' && this.hasGyro && this.gyro.baselineSet) {
+      const gx = this.gyro.value.x;
+      const gy = this.gyro.value.y;
+      if (Math.abs(gx) > 0 || Math.abs(gy) > 0) {
+        return { x: gx, y: gy };
+      }
+    }
+
+    if (mode === 'touch' && this.hasTouch) {
+      const tx = this.touch.value.x;
+      const ty = this.touch.value.y;
+      if (Math.abs(tx) > 0 || Math.abs(ty) > 0) {
+        return { x: tx, y: ty };
+      }
+    }
+
+    const padStick = this.getGamepadStick();
+    if (padStick && (Math.abs(padStick.x) > 0 || Math.abs(padStick.y) > 0)) {
+      return padStick;
+    }
+
+    const left = this.isDown('ArrowLeft') || this.isDown('KeyA');
+    const right = this.isDown('ArrowRight') || this.isDown('KeyD');
+    const up = this.isDown('ArrowUp') || this.isDown('KeyW');
+    const down = this.isDown('ArrowDown') || this.isDown('KeyS');
+    let x = 0;
+    let y = 0;
+    if (left) x -= 1;
+    if (right) x += 1;
+    if (up) y -= 1;
+    if (down) y += 1;
+    if (x > 1) x = 1;
+    if (x < -1) x = -1;
+    if (y > 1) y = 1;
+    if (y < -1) y = -1;
+    return { x, y };
+  }
+}
+
+const DEFAULT_STICK_GATE = [
+  [84, 0],
+  [59, 59],
+  [0, 84],
+  [-59, 59],
+  [-84, 0],
+  [-59, -59],
+  [0, -84],
+  [59, -59],
+];
+
+const STICK_SHAPE_POINTS = [
+  [105, 0],
+  [105, 105],
+  [0, 105],
+  [-105, 105],
+  [-105, 0],
+  [-105, -105],
+  [0, -105],
+  [105, -105],
+];
+
+const STICK_SHAPE_TABLE = [
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3,
+  3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 7, 7,
+  7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
+  14, 14, 15, 15, 16, 17, 17, 18, 19, 19, 20, 21,
+  22, 22, 23, 24, 25, 25, 26, 27, 28, 29, 29, 30,
+  31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42,
+  43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 54, 55,
+  56, 57, 58, 60,
+];
+
+const STICK_RANGE = 60;
+const FLOAT_EPSILON = 1.1920928955078125e-7;
+
+function clamp(value, min, max) {
+  if (value < min) {
+    return min;
+  }
+  if (value > max) {
+    return max;
+  }
+  return value;
+}
+
+function applyStickGate(x, y, gate) {
+  let adjX = x;
+  let adjY = y;
+
+  for (let i = 0; i < 8; i += 1) {
+    const next = i === 7 ? 0 : i + 1;
+    const f9 = gate[i][0];
+    const f4 = gate[i][1];
+    const f10 = gate[next][0];
+    const f5 = gate[next][1];
+
+    let denom = f9 * f5 - f10 * f4;
+    if (Math.abs(denom) < FLOAT_EPSILON) {
+      continue;
+    }
+    denom = 1 / denom;
+
+    const f5_ = (f5 * adjX - f10 * adjY) * denom;
+    const f3 = (-f4 * adjX + f9 * adjY) * denom;
+    if (f5_ < 0 || f3 < 0) {
+      continue;
+    }
+
+    let mapped = Math.trunc(f5_ * STICK_SHAPE_POINTS[i][0] + f3 * STICK_SHAPE_POINTS[next][0]);
+    let sign = mapped < 0 ? -1 : 1;
+    let idx = clamp(Math.abs(mapped), 0, 99);
+    adjX = sign * STICK_SHAPE_TABLE[idx];
+
+    mapped = Math.trunc(f5_ * STICK_SHAPE_POINTS[i][1] + f3 * STICK_SHAPE_POINTS[next][1]);
+    sign = mapped < 0 ? -1 : 1;
+    idx = clamp(Math.abs(mapped), 0, 99);
+    adjY = sign * STICK_SHAPE_TABLE[idx];
+    break;
+  }
+
+  return { x: adjX, y: adjY };
+}
+
+const GAMEPAD_SWITCH_THRESHOLD = 0.0025;
+
+function readPadStick(pad) {
+  const rawX = pad.axes[0] ?? 0;
+  const rawY = pad.axes[1] ?? 0;
+  const { x, y } = applyStickGate(
+    clamp(Math.round(rawX * 127), -128, 127),
+    clamp(Math.round(rawY * 127), -128, 127),
+    DEFAULT_STICK_GATE,
+  );
+  const value = {
+    x: clamp(x / STICK_RANGE, -1, 1),
+    y: clamp(y / STICK_RANGE, -1, 1),
+  };
+  return { value, magnitudeSq: value.x * value.x + value.y * value.y };
+}

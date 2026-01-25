@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SMB1 Web Gameplay</title>
+  <link rel="stylesheet" href="./style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "gl-matrix": "https://cdn.jsdelivr.net/npm/gl-matrix@3.4.3/esm/index.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <canvas id="hud-canvas"></canvas>
+  <div id="stage-fade" class="stage-fade"></div>
+  <div id="overlay" class="overlay">
+    <div class="panel">
+      <h1>Super Monkey Ball 1</h1>
+      <p>Standard gameplay (Beginner / Advanced / Expert).</p>
+      <label class="field">
+        <span>Game Source</span>
+        <select id="game-source">
+          <option value="smb1">Super Monkey Ball 1</option>
+          <option value="smb2">Super Monkey Ball 2</option>
+          <option value="mb2ws">Super Monkey Ball 2 (MB2WS)</option>
+        </select>
+      </label>
+
+      <label id="control-mode-field" class="field hidden">
+        <span>Control Mode</span>
+        <select id="control-mode"></select>
+      </label>
+      <div id="smb1-fields">
+        <label class="field">
+          <span>Difficulty</span>
+          <select id="difficulty">
+            <option value="beginner">Beginner</option>
+            <option value="advanced">Advanced</option>
+            <option value="expert">Expert</option>
+            <option value="beginner-extra">Beginner (Extra)</option>
+            <option value="advanced-extra">Advanced (Extra)</option>
+            <option value="expert-extra">Expert (Extra)</option>
+            <option value="master">Master</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Stage</span>
+          <select id="smb1-stage"></select>
+        </label>
+      </div>
+      <div id="smb2-fields" class="hidden">
+        <label class="field">
+          <span>SMB2 Mode</span>
+          <select id="smb2-mode">
+            <option value="challenge">Challenge</option>
+            <option value="story">Story</option>
+          </select>
+        </label>
+        <div id="smb2-challenge-fields">
+          <label class="field">
+            <span>Challenge Difficulty</span>
+            <select id="smb2-challenge">
+              <option value="beginner">Beginner</option>
+              <option value="advanced">Advanced</option>
+              <option value="expert">Expert</option>
+              <option value="beginner-extra">Beginner Extra</option>
+              <option value="advanced-extra">Advanced Extra</option>
+              <option value="expert-extra">Expert Extra</option>
+              <option value="master">Master</option>
+              <option value="master-extra">Master Extra</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Challenge Stage</span>
+            <select id="smb2-challenge-stage"></select>
+          </label>
+        </div>
+        <div id="smb2-story-fields" class="hidden">
+          <label class="field">
+            <span>Story World</span>
+            <select id="smb2-story-world"></select>
+          </label>
+          <label class="field">
+            <span>Story Stage</span>
+            <select id="smb2-story-stage"></select>
+          </label>
+        </div>
+      </div>
+      <label class="field checkbox-field hidden">
+        <span>Settings</span>
+      </label>
+      <div class="slider-group">
+        <label class="field slider-field">
+          <span>Music Volume <output id="music-volume-value">50%</output></span>
+          <input id="music-volume" type="range" min="0" max="100" value="50" />
+        </label>
+        <label class="field slider-field">
+          <span>SFX Volume <output id="sfx-volume-value">30%</output></span>
+          <input id="sfx-volume" type="range" min="0" max="100" value="30" />
+        </label>
+        <label class="field slider-field">
+          <span>Announcer Volume <output id="announcer-volume-value">30%</output></span>
+          <input id="announcer-volume" type="range" min="0" max="100" value="30" />
+        </label>
+      </div>
+      <div class="row">
+        <button id="start" disabled>Start</button>
+        <button id="resume" class="ghost" disabled>Resume</button>
+      </div>
+      <div class="hint">
+        <div>Controls: WASD / Arrow Keys = tilt, R = reset stage, N = skip stage, M = toggle render mode</div>
+        <div>Run a local server (example: <code>python -m http.server</code> from repo root).</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="touch-controls" class="touch-controls hidden" aria-hidden="true">
+    <div class="joystick hidden" aria-hidden="true">
+      <div class="joystick-base"></div>
+      <div class="joystick-handle"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    const field = document.getElementById('control-mode-field');
+    const select = document.getElementById('control-mode');
+    const hasTouch = ('ontouchstart' in window) || ((navigator.maxTouchPoints ?? 0) > 0);
+    const hasGyro = typeof window.DeviceOrientationEvent !== 'undefined';
+
+    if (!field || !select || (!hasTouch && !hasGyro)) {
+      field?.classList.add('hidden');
+    } else {
+      field.classList.remove('hidden');
+
+      const options = [];
+      //if (hasGyro) options.push({ value: 'gyro', label: 'Gyro' });
+      if (hasTouch) options.push({ value: 'touch', label: 'Touchscreen' });
+
+      select.replaceChildren(...options.map((opt) => {
+        const el = document.createElement('option');
+        el.value = opt.value;
+        el.textContent = opt.label;
+        return el;
+      }));
+
+      const key = 'smb_control_mode';
+      const saved = localStorage.getItem(key);
+      if (saved && options.some((o) => o.value === saved)) {
+        select.value = saved;
+      } else {
+        select.value = hasTouch ? 'touch' : 'gyro';
+        localStorage.setItem(key, select.value);
+      }
+
+      select.addEventListener('change', async () => {
+        let next = select.value;
+
+        // iOS: gyro requires a user-gesture permission prompt.
+        if (next === 'gyro' && typeof window.DeviceOrientationEvent?.requestPermission === 'function') {
+          try {
+            const result = await window.DeviceOrientationEvent.requestPermission();
+            if (result !== 'granted') {
+              next = hasTouch ? 'touch' : 'gyro';
+              select.value = next;
+            }
+          } catch {
+            next = hasTouch ? 'touch' : 'gyro';
+            select.value = next;
+          }
+        }
+
+        localStorage.setItem(key, next);
+      });
+    }
+  </script>
+
+  <script type="module" src="./dist/main.js"></script>
+</body>
+</html>
