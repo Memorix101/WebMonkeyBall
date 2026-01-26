@@ -34,9 +34,14 @@ export class Input {
       hasSample: false,
     };
 
+    this.gyroSensitivity = 25;
+    this.joystickScale = 1;
+    this.inputFalloff = 1.5;
+
     this.touchRoot = document.getElementById('touch-controls');
     this.joystickEl = this.touchRoot?.querySelector?.('.joystick') ?? null;
     this.joystickHandleEl = this.touchRoot?.querySelector?.('.joystick-handle') ?? null;
+    this.touchRoot?.style.setProperty('--joystick-scale', String(this.joystickScale));
 
     this.handlers = {
       keydown: (event) => {
@@ -82,7 +87,7 @@ export class Input {
         }
         event.preventDefault();
 
-        const MAX_RADIUS = 55;
+        const MAX_RADIUS = 55 * this.joystickScale;
         const dx = event.clientX - this.touch.centerX;
         const dy = event.clientY - this.touch.centerY;
         const dist = Math.hypot(dx, dy);
@@ -133,6 +138,11 @@ export class Input {
         if (this.isOverlayVisible()) {
           return;
         }
+        if (this.getControlMode() === 'gyro') {
+          event.preventDefault();
+          this.recalibrateGyro();
+          return;
+        }
         if (event.target instanceof HTMLElement) {
           const interactive = event.target.closest('button, input, select, textarea, a, label');
           if (interactive) {
@@ -167,7 +177,7 @@ export class Input {
           this.gyro.baseGamma = gamma;
         }
 
-        const MAX_ANGLE = 25;
+        const MAX_ANGLE = this.gyroSensitivity;
         const x = (gamma - this.gyro.baseGamma) / MAX_ANGLE;
         const y = (beta - this.gyro.baseBeta) / MAX_ANGLE;
         this.gyro.value.x = clamp(x, -1, 1);
@@ -289,7 +299,10 @@ export class Input {
     if (!this.joystickHandleEl) {
       return;
     }
-    this.joystickHandleEl.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    const scale = this.joystickScale || 1;
+    const adjX = dx / scale;
+    const adjY = dy / scale;
+    this.joystickHandleEl.style.transform = `translate(calc(-50% + ${adjX}px), calc(-50% + ${adjY}px))`;
   }
 
   hideJoystick() {
@@ -335,6 +348,23 @@ export class Input {
       baselineSet: this.gyro.baselineSet,
       hasSample: this.gyroRaw.hasSample,
     };
+  }
+
+  setGyroSensitivity(value) {
+    this.gyroSensitivity = clamp(value, 10, 25);
+  }
+
+  getGyroSensitivity() {
+    return this.gyroSensitivity;
+  }
+
+  setJoystickScale(value) {
+    this.joystickScale = clamp(value, 0.5, 2);
+    this.touchRoot?.style.setProperty('--joystick-scale', String(this.joystickScale));
+  }
+
+  setInputFalloff(value) {
+    this.inputFalloff = clamp(value, 1, 2);
   }
 
   wasPressed(code) {
@@ -453,13 +483,13 @@ export class Input {
       const tx = this.touch.value.x;
       const ty = this.touch.value.y;
       if (Math.abs(tx) > 0 || Math.abs(ty) > 0) {
-        return { x: tx, y: ty };
+        return applyInputFalloff({ x: tx, y: ty }, this.inputFalloff);
       }
     }
 
     const padStick = this.getGamepadStick();
     if (padStick && (Math.abs(padStick.x) > 0 || Math.abs(padStick.y) > 0)) {
-      return padStick;
+      return applyInputFalloff(padStick, this.inputFalloff);
     }
 
     const left = this.isDown('ArrowLeft') || this.isDown('KeyA');
@@ -580,4 +610,15 @@ function readPadStick(pad) {
     y: clamp(y / STICK_RANGE, -1, 1),
   };
   return { value, magnitudeSq: value.x * value.x + value.y * value.y };
+}
+
+function applyInputFalloff(stick, power) {
+  const magnitude = Math.hypot(stick.x, stick.y);
+  if (magnitude <= 0) {
+    return stick;
+  }
+  const clamped = Math.min(1, magnitude);
+  const eased = Math.pow(clamped, power);
+  const scale = eased / magnitude;
+  return { x: stick.x * scale, y: stick.y * scale };
 }

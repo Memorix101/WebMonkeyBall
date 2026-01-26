@@ -63,6 +63,19 @@ const controlModeSelect = document.getElementById('control-mode') as HTMLSelectE
 const gyroRecalibrateButton = document.getElementById('gyro-recalibrate') as HTMLButtonElement | null;
 const gyroHelper = document.getElementById('gyro-helper') as HTMLElement | null;
 const gyroHelperFrame = gyroHelper?.querySelector('.gyro-helper-frame') as HTMLElement | null;
+const gyroHelperDevice = document.getElementById('gyro-helper-device') as HTMLElement | null;
+const controlModeSettings = document.getElementById('control-mode-settings') as HTMLElement | null;
+const gyroSettings = document.getElementById('gyro-settings') as HTMLElement | null;
+const touchSettings = document.getElementById('touch-settings') as HTMLElement | null;
+const inputFalloffBlock = document.getElementById('input-falloff-block') as HTMLElement | null;
+const gyroSensitivityInput = document.getElementById('gyro-sensitivity') as HTMLInputElement | null;
+const gyroSensitivityValue = document.getElementById('gyro-sensitivity-value') as HTMLOutputElement | null;
+const joystickSizeInput = document.getElementById('joystick-size') as HTMLInputElement | null;
+const joystickSizeValue = document.getElementById('joystick-size-value') as HTMLOutputElement | null;
+const inputFalloffInput = document.getElementById('input-falloff') as HTMLInputElement | null;
+const inputFalloffValue = document.getElementById('input-falloff-value') as HTMLOutputElement | null;
+const inputFalloffCurveWrap = document.getElementById('input-falloff-curve-wrap') as HTMLElement | null;
+const inputFalloffPath = document.getElementById('input-falloff-path') as SVGPathElement | null;
 const startButton = document.getElementById('start') as HTMLButtonElement;
 const resumeButton = document.getElementById('resume') as HTMLButtonElement;
 const difficultySelect = document.getElementById('difficulty') as HTMLSelectElement;
@@ -344,6 +357,7 @@ let paused = false;
 let lastTime = performance.now();
 let lastRenderTime = lastTime;
 let lastHudTime = lastTime;
+let lastControlModeSettingsCheck = lastTime;
 let stageLoadToken = 0;
 let renderReady = false;
 let activeGameSource: GameSource = GAME_SOURCES.SMB1;
@@ -644,10 +658,90 @@ function bindVolumeControl(
   update();
 }
 
+function readStoredNumber(key: string, fallback: number) {
+  const raw = localStorage.getItem(key);
+  const value = raw === null ? NaN : Number(raw);
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function bindRangeControl(
+  input: HTMLInputElement | null,
+  output: HTMLOutputElement | null,
+  key: string,
+  fallback: number,
+  format: (value: number) => string,
+  apply: (value: number) => void,
+) {
+  if (!input) {
+    return;
+  }
+  const initial = readStoredNumber(key, fallback);
+  input.value = String(initial);
+  const update = () => {
+    const value = Number(input.value);
+    apply(value);
+    if (output) {
+      output.value = format(value);
+      output.textContent = output.value;
+    }
+    localStorage.setItem(key, String(value));
+  };
+  input.addEventListener('input', update);
+  update();
+}
+
+function updateFalloffCurve(power: number) {
+  if (!inputFalloffPath) {
+    return;
+  }
+  const steps = 24;
+  let path = 'M 0 100';
+  for (let i = 1; i <= steps; i += 1) {
+    const t = i / steps;
+    const x = t * 100;
+    const y = 100 - Math.pow(t, power) * 100;
+    path += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
+  }
+  inputFalloffPath.setAttribute('d', path);
+}
+
+function updateControlModeSettingsVisibility() {
+  if (!controlModeSelect || !controlModeSettings) {
+    return;
+  }
+  const hasOptions = controlModeSelect.options.length > 0;
+  const pads = navigator.getGamepads?.() ?? navigator.webkitGetGamepads?.();
+  const hasController = !!pads && Array.from(pads).some((pad) => pad?.connected);
+  const showSettings = hasOptions || hasController;
+  controlModeSettings.classList.toggle('hidden', !showSettings);
+  if (!hasOptions) {
+    gyroSettings?.classList.add('hidden');
+    touchSettings?.classList.add('hidden');
+    inputFalloffBlock?.classList.toggle('hidden', !hasController);
+    inputFalloffCurveWrap?.classList.toggle('hidden', !hasController);
+    return;
+  }
+  const mode = controlModeSelect.value;
+  gyroSettings?.classList.toggle('hidden', mode !== 'gyro');
+  touchSettings?.classList.toggle('hidden', mode !== 'touch');
+  const showFalloff = mode === 'touch' || hasController;
+  inputFalloffBlock?.classList.toggle('hidden', !showFalloff);
+  inputFalloffCurveWrap?.classList.toggle('hidden', mode === 'gyro');
+}
+
+function maybeUpdateControlModeSettings(now: number) {
+  if (now - lastControlModeSettingsCheck < 1000) {
+    return;
+  }
+  lastControlModeSettingsCheck = now;
+  updateControlModeSettingsVisibility();
+}
+
 function renderFrame(now: number) {
   requestAnimationFrame(renderFrame);
 
   updateGyroHelper();
+  maybeUpdateControlModeSettings(now);
 
   if (!running || !viewerInput || !camera) {
     lastTime = now;
@@ -743,21 +837,27 @@ function updateGyroHelper() {
   if (controlModeField) {
     controlModeField.classList.toggle('hidden', controlModeSelect.options.length === 0);
   }
+  updateControlModeSettingsVisibility();
   if (!showGyro) {
+    gyroHelperDevice?.classList.remove('at-limit');
     return;
   }
   const sample = game.input?.getGyroSample?.();
   if (!sample || !sample.hasSample) {
     gyroHelperFrame.style.opacity = '0.5';
+    gyroHelperDevice?.classList.remove('at-limit');
     return;
   }
   const deltaBeta = sample.baselineSet ? sample.beta - sample.baseBeta : sample.beta;
   const deltaGamma = sample.baselineSet ? sample.gamma - sample.baseGamma : sample.gamma;
-  const x = clamp(-deltaBeta, -30, 30);
-  const y = clamp(deltaGamma, -30, 30);
+  const maxAngle = game.input?.getGyroSensitivity?.() ?? 25;
+  const x = clamp(-deltaBeta, -maxAngle, maxAngle);
+  const y = clamp(deltaGamma, -maxAngle, maxAngle);
   gyroHelperFrame.style.opacity = '1';
   gyroHelperFrame.style.setProperty('--gyro-x', `${x}deg`);
   gyroHelperFrame.style.setProperty('--gyro-y', `${y}deg`);
+  const atLimit = Math.abs(deltaBeta) >= maxAngle || Math.abs(deltaGamma) >= maxAngle;
+  gyroHelperDevice?.classList.toggle('at-limit', atLimit);
 }
 
 setOverlayVisible(true);
@@ -778,6 +878,43 @@ bindVolumeControl(announcerVolumeInput, announcerVolumeValue, (value) => {
   audio.setAnnouncerVolume(value);
 });
 
+bindRangeControl(
+  gyroSensitivityInput,
+  gyroSensitivityValue,
+  'smb_gyro_sensitivity',
+  25,
+  (value) => `${Math.round(value)}°`,
+  (value) => {
+    game.input?.setGyroSensitivity?.(value);
+  },
+);
+
+bindRangeControl(
+  joystickSizeInput,
+  joystickSizeValue,
+  'smb_touch_joystick_scale',
+  1,
+  (value) => `${value.toFixed(1)}x`,
+  (value) => {
+    game.input?.setJoystickScale?.(value);
+  },
+);
+
+bindRangeControl(
+  inputFalloffInput,
+  inputFalloffValue,
+  'smb_input_falloff',
+  1.5,
+  (value) => value.toFixed(2).replace(/\.00$/, ''),
+  (value) => {
+    game.input?.setInputFalloff?.(value);
+    updateFalloffCurve(value);
+  },
+);
+
+updateControlModeSettingsVisibility();
+updateFalloffCurve(game.input?.inputFalloff ?? 1.5);
+
 smb2ModeSelect?.addEventListener('change', () => {
   updateSmb2ModeFields();
 });
@@ -792,6 +929,18 @@ difficultySelect?.addEventListener('change', () => {
 
 gameSourceSelect?.addEventListener('change', () => {
   updateGameSourceFields();
+});
+
+controlModeSelect?.addEventListener('change', () => {
+  updateControlModeSettingsVisibility();
+});
+
+window.addEventListener('gamepadconnected', () => {
+  updateControlModeSettingsVisibility();
+});
+
+window.addEventListener('gamepaddisconnected', () => {
+  updateControlModeSettingsVisibility();
 });
 
 if (interpolationToggle) {

@@ -66,6 +66,35 @@
           </div>
         </div>
       </label>
+      <div id="control-mode-settings" class="control-mode-settings hidden">
+        <div id="gyro-settings" class="control-mode-block hidden">
+          <label class="field slider-field">
+            <span>Gyro Sensitivity <output id="gyro-sensitivity-value">25°</output></span>
+            <input id="gyro-sensitivity" type="range" min="10" max="25" step="1" value="25" />
+          </label>
+          <div id="gyro-hint" class="control-hint">Tap the screen to recalibrate gyro.</div>
+        </div>
+        <div id="touch-settings" class="control-mode-block hidden">
+          <label class="field slider-field">
+            <span>Virtual Joystick Size <output id="joystick-size-value">1.0x</output></span>
+            <input id="joystick-size" type="range" min="0.5" max="2" step="0.1" value="1" />
+          </label>
+        </div>
+        <div id="input-falloff-block" class="control-mode-block">
+          <label class="field slider-field">
+            <span>Input Falloff <output id="input-falloff-value">1.5</output></span>
+            <input id="input-falloff" type="range" min="1" max="2" step="0.05" value="1.5" />
+          </label>
+          <div id="input-falloff-curve-wrap" class="response-curve">
+            <svg id="input-falloff-curve" viewBox="0 0 100 100" role="img" aria-hidden="true">
+              <path id="input-falloff-path" d="M 0 100 L 100 0"></path>
+            </svg>
+          </div>
+          <div class="control-hint">
+            A lower value makes joystick input more linear. Higher makes small adjustments more precise.
+          </div>
+        </div>
+      </div>
       <div id="smb1-fields">
         <label class="field">
           <span>Difficulty</span>
