@@ -1707,30 +1707,13 @@ export function collideBallWithStageObjects(ball, stageRuntime) {
           SWITCH_TRIGGER_RADIUS,
         );
       }
-      if (!hitSwitch || stageSwitch.cooldown > 0) {
+      if (!hitSwitch || (stageRuntime.format !== 'smb2' && stageSwitch.cooldown > 0)) {
         continue;
       }
-      if (stageSwitch.state < 2) {
-        stageRuntime.switchPressCount = (stageRuntime.switchPressCount ?? 0) + 1;
+      if (stageRuntime.format === 'smb2') {
+        continue;
       }
-      const targetIndices = stageRuntime.animGroupIdMap.get(stageSwitch.animGroupId)
-        ?? [stageSwitch.animGroupId];
-      for (const targetIndex of targetIndices) {
-        const targetInfo = stageRuntime.animGroups[targetIndex];
-        const targetAg = stageRuntime.stage.animGroups[targetIndex];
-        if (!targetInfo || !targetAg) {
-          continue;
-        }
-        const nextState = stageSwitch.type & 7;
-        const prevState = targetInfo.playbackState & 7;
-        if (targetAg.animLoopType === ANIM_PLAY_ONCE && prevState === 1 && (nextState === 0 || nextState === 3)) {
-          targetInfo.animFrame = Math.trunc((targetAg.loopStartSeconds ?? 0) * 60);
-        }
-        targetInfo.playbackState = (targetInfo.playbackState & ~7) | nextState;
-        if (nextState === 1) {
-          targetInfo.prevTransform.set(targetInfo.transform);
-        }
-      }
+      stageRuntime.applySwitchPlayback(stageSwitch, true);
       stageSwitch.cooldown = SWITCH_COOLDOWN_FRAMES;
     }
   }

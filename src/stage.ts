@@ -933,7 +933,7 @@ class StageParserSmb2 extends StageParser {
     const wormholeCount = this.readS32(offset + 0xc4);
     const wormholesPtr = this.readPtr(offset + 0xc8);
     const initialPlaybackState = this.readS32(offset + 0xcc);
-    const loopStartSeconds = 0;
+    const loopStartSeconds = this.readF32(offset + 0xd0);
     const loopEndSeconds = this.readF32(offset + 0xd4);
     const textureScroll = this.readPtr(offset + 0xd8);
 
@@ -1181,7 +1181,7 @@ export class StageRuntime {
           prevRot: { x: stageAg.initRot.x, y: stageAg.initRot.y, z: stageAg.initRot.z },
           transform: new Float32Array(12),
           prevTransform: new Float32Array(12),
-          animFrame: Math.trunc((stageAg.loopStartSeconds ?? 0) * 60),
+          animFrame: 0,
           playbackState: stageAg.initialPlaybackState ?? 0,
           seesawState: null,
         };
@@ -1372,6 +1372,7 @@ export class StageRuntime {
             localVel: { x: 0, y: 0, z: 0 },
             state: 0,
             pressImpulse: false,
+            triggered: false,
           };
           this.switches.push(runtimeSwitch);
           this.switchesByGroup[i].push(runtimeSwitch);
@@ -1401,6 +1402,7 @@ export class StageRuntime {
           localVel: { x: 0, y: 0, z: 0 },
           state: 0,
           pressImpulse: false,
+          triggered: false,
         };
         this.switches.push(runtimeSwitch);
         if (this.switchesByGroup[0]) {
@@ -1439,6 +1441,30 @@ export class StageRuntime {
       }
     }
     return true;
+  }
+
+  applySwitchPlayback(stageSwitch, countSound = true) {
+    const nextState = stageSwitch.type & 7;
+    if (countSound && stageSwitch.state < 2) {
+      this.switchPressCount = (this.switchPressCount ?? 0) + 1;
+    }
+    const targetIndices = this.animGroupIdMap.get(stageSwitch.animGroupId)
+      ?? [stageSwitch.animGroupId];
+    for (const targetIndex of targetIndices) {
+      const targetInfo = this.animGroups[targetIndex];
+      const targetAg = this.stage.animGroups[targetIndex];
+      if (!targetInfo || !targetAg) {
+        continue;
+      }
+      const prevState = targetInfo.playbackState & 7;
+      if (targetAg.animLoopType === ANIM_PLAY_ONCE && prevState === 1 && (nextState === 0 || nextState === 3)) {
+        targetInfo.animFrame = Math.trunc((targetAg.loopStartSeconds ?? 0) * 60);
+      }
+      targetInfo.playbackState = (targetInfo.playbackState & ~7) | nextState;
+      if (nextState === 1) {
+        targetInfo.prevTransform.set(targetInfo.transform);
+      }
+    }
   }
 
   advance(frameDelta, paused, world, animTimerOverride = null, smb2LoadInFrames = null, ball = null, camera = null) {
@@ -1577,7 +1603,7 @@ export class StageRuntime {
       if (stageAg.animLoopType === ANIM_LOOP || stageAg.animLoopType === ANIM_SEESAW) {
         const loopSpan = stageAg.loopEndSeconds - stageAg.loopStartSeconds;
         if (loopSpan > 0) {
-          animTime -= loopSpan * floor((animTime - stageAg.loopStartSeconds) / loopSpan);
+          animTime -= loopSpan * Math.trunc(animTime / loopSpan);
           animTime += stageAg.loopStartSeconds;
         }
       }
@@ -1802,6 +1828,7 @@ export class StageRuntime {
         if (stageSwitch.state === 0) {
           stageSwitch.state = 1;
           stageSwitch.pressImpulse = false;
+          stageSwitch.triggered = false;
         }
         stageSwitch.localVel.y += -stageSwitch.localPos.y * 0.1;
         stageSwitch.localVel.y *= 0.95;
@@ -1819,9 +1846,18 @@ export class StageRuntime {
         }
         if (groupMatches) {
           stageSwitch.state = 2;
+          if (this.format === 'smb2' && !stageSwitch.triggered) {
+            this.applySwitchPlayback(stageSwitch, false);
+            stageSwitch.triggered = true;
+          }
         }
         if (stageSwitch.pressImpulse && stageSwitch.localPos.y < -0.025) {
           stageSwitch.state = 2;
+          if (this.format === 'smb2' && !stageSwitch.triggered) {
+            this.switchPressCount = (this.switchPressCount ?? 0) + 1;
+            this.applySwitchPlayback(stageSwitch, false);
+            stageSwitch.triggered = true;
+          }
         }
       } else if (!groupMatches) {
         stageSwitch.state = 0;
