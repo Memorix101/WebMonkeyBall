@@ -550,7 +550,7 @@ button:disabled {
   top: 12px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(420px, 92vw);
+  width: min(220px, 48vw);
   height: 40px;
   padding: 6px 16px;
   border-radius: 999px;
@@ -564,4 +564,13 @@ button:disabled {
   justify-content: center;
   z-index: 9;
   backdrop-filter: blur(6px);
+}
+
+.fullscreen-button {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  z-index: 12;
+  padding: 6px 10px;
+  font-size: 11px;
 }

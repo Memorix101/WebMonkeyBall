@@ -39,6 +39,7 @@ export class Input {
     this.inputFalloff = 1;
     this.touchPreview = false;
     this.padGate = loadPadGate() ?? DEFAULT_STICK_GATE.map((point) => [point[0], point[1]]);
+    this.gyroTapMode = 'recalibrate';
 
     this.touchRoot = document.getElementById('touch-controls');
     this.joystickEl = this.touchRoot?.querySelector?.('.joystick') ?? null;
@@ -157,7 +158,7 @@ export class Input {
         if (this.isOverlayVisible()) {
           return;
         }
-        if (this.getControlMode() === 'gyro') {
+        if (this.getControlMode() === 'gyro' && this.gyroTapMode === 'recalibrate') {
           event.preventDefault();
           this.recalibrateGyro();
           return;
@@ -184,8 +185,9 @@ export class Input {
           return;
         }
 
-        const beta = typeof event.beta === 'number' ? event.beta : 0;
-        const gamma = typeof event.gamma === 'number' ? event.gamma : 0;
+        const rawBeta = typeof event.beta === 'number' ? event.beta : 0;
+        const rawGamma = typeof event.gamma === 'number' ? event.gamma : 0;
+        const { beta, gamma } = adjustGyroForOrientation(rawBeta, rawGamma);
         this.gyroRaw.beta = beta;
         this.gyroRaw.gamma = gamma;
         this.gyroRaw.hasSample = true;
@@ -329,6 +331,9 @@ export class Input {
     if (!this.joystickHandleEl) {
       return;
     }
+    if (this.joystickEl?.classList.contains('hidden') && !this.isOverlayVisible()) {
+      this.joystickEl.classList.remove('hidden');
+    }
     const scale = this.joystickScale || 1;
     const adjX = dx / scale;
     const adjY = dy / scale;
@@ -398,6 +403,10 @@ export class Input {
 
   setInputFalloff(value) {
     this.inputFalloff = clamp(value, 1, 2);
+  }
+
+  setGyroTapMode(mode) {
+    this.gyroTapMode = mode === 'action' ? 'action' : 'recalibrate';
   }
 
   setPadGate(points) {
@@ -729,4 +738,27 @@ function applyInputFalloff(stick, power) {
   const eased = Math.pow(clamped, power);
   const scale = eased / maxAxis;
   return { x: stick.x * scale, y: stick.y * scale };
+}
+
+function adjustGyroForOrientation(beta, gamma) {
+  const angle = getScreenOrientationAngle();
+  switch (angle) {
+    case 90:
+      return { beta: -gamma, gamma: beta };
+    case 180:
+      return { beta: -beta, gamma: -gamma };
+    case 270:
+      return { beta: gamma, gamma: -beta };
+    default:
+      return { beta, gamma };
+  }
+}
+
+function getScreenOrientationAngle() {
+  const orientation = window.screen?.orientation?.angle;
+  if (typeof orientation === 'number') {
+    return ((orientation % 360) + 360) % 360;
+  }
+  const legacy = typeof window.orientation === 'number' ? window.orientation : 0;
+  return ((legacy % 360) + 360) % 360;
 }

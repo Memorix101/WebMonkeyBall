@@ -1734,6 +1734,7 @@ export class Game {
           && !timeoverActive;
         const switchesEnabled = this.goalTimerFrames <= 0 && !ringoutActive && !timeoverActive;
         const isBonusStage = this.isBonusStageActive();
+        this.input?.setGyroTapMode?.(inputEnabled ? 'recalibrate' : 'action');
         const fastForwardIntro = this.stageAttempts === 1
           && this.introTimerFrames > 120
           && this.input?.isPrimaryActionDown?.();

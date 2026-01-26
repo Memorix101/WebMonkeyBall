@@ -67,8 +67,10 @@ function isNaomiStage(stageId: number): boolean {
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const hudCanvas = document.getElementById('hud-canvas') as HTMLCanvasElement;
 const overlay = document.getElementById('overlay') as HTMLElement;
+const overlayPanel = document.querySelector('.panel') as HTMLElement | null;
 const stageFade = document.getElementById('stage-fade') as HTMLElement;
 const mobileMenuButton = document.getElementById('mobile-menu-button') as HTMLButtonElement | null;
+const fullscreenButton = document.getElementById('fullscreen-button') as HTMLButtonElement | null;
 const controlModeField = document.getElementById('control-mode-field') as HTMLElement | null;
 const controlModeSelect = document.getElementById('control-mode') as HTMLSelectElement | null;
 const gyroRecalibrateButton = document.getElementById('gyro-recalibrate') as HTMLButtonElement | null;
@@ -127,11 +129,29 @@ function updateMobileMenuButtonVisibility() {
   mobileMenuButton.classList.toggle('hidden', !shouldShow);
 }
 
+function updateFullscreenButtonVisibility() {
+  if (!fullscreenButton) {
+    return;
+  }
+  const root = document.documentElement as HTMLElement & {
+    webkitRequestFullscreen?: () => Promise<void> | void;
+  };
+  const supportsFullscreen = typeof root.requestFullscreen === 'function' || typeof root.webkitRequestFullscreen === 'function';
+  const isFullscreen = !!(document.fullscreenElement || (document as typeof document & { webkitFullscreenElement?: Element | null }).webkitFullscreenElement);
+  const shouldShow = hasTouch && supportsFullscreen;
+  fullscreenButton.classList.toggle('hidden', !shouldShow);
+  if (!shouldShow) {
+    return;
+  }
+  fullscreenButton.textContent = supportsFullscreen && isFullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+}
+
 function setOverlayVisible(visible: boolean) {
   overlay.classList.toggle('hidden', !visible);
   canvas.style.pointerEvents = visible ? 'none' : 'auto';
   document.body.classList.toggle('gameplay-active', !visible);
   updateMobileMenuButtonVisibility();
+  updateFullscreenButtonVisibility();
   syncTouchPreviewVisibility();
 }
 
@@ -934,8 +954,16 @@ function maybeUpdateControlModeSettings(now: number) {
 function syncTouchPreviewVisibility() {
   const overlayVisible = !overlay.classList.contains('hidden');
   const mode = controlModeSelect?.value;
-  const shouldPreview = overlayVisible && mode === 'touch';
+  const shouldPreview = overlayVisible && mode === 'touch' && !isOverlayPanelNearBottom();
   game.input?.setTouchPreview?.(shouldPreview);
+}
+
+function isOverlayPanelNearBottom() {
+  if (!overlayPanel) {
+    return false;
+  }
+  const buffer = 24;
+  return overlayPanel.scrollTop + overlayPanel.clientHeight >= overlayPanel.scrollHeight - buffer;
 }
 
 function renderFrame(now: number) {
@@ -1118,6 +1146,7 @@ bindRangeControl(
 updateControlModeSettingsVisibility();
 updateFalloffCurve(game.input?.inputFalloff ?? 1);
 syncTouchPreviewVisibility();
+updateFullscreenButtonVisibility();
 
 smb2ModeSelect?.addEventListener('change', () => {
   updateSmb2ModeFields();
@@ -1137,6 +1166,40 @@ gameSourceSelect?.addEventListener('change', () => {
 
 controlModeSelect?.addEventListener('change', () => {
   updateControlModeSettingsVisibility();
+  syncTouchPreviewVisibility();
+});
+
+fullscreenButton?.addEventListener('click', async () => {
+  const root = document.documentElement as HTMLElement & {
+    webkitRequestFullscreen?: () => Promise<void> | void;
+  };
+  try {
+    if (document.fullscreenElement || (document as typeof document & { webkitFullscreenElement?: Element | null }).webkitFullscreenElement) {
+      if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      } else if ((document as typeof document & { webkitExitFullscreen?: () => Promise<void> | void }).webkitExitFullscreen) {
+        await (document as typeof document & { webkitExitFullscreen?: () => Promise<void> | void }).webkitExitFullscreen?.();
+      }
+    } else if (root.requestFullscreen) {
+      await root.requestFullscreen();
+    } else if (root.webkitRequestFullscreen) {
+      await root.webkitRequestFullscreen();
+    }
+  } catch {
+    // Ignore fullscreen errors.
+  }
+  updateFullscreenButtonVisibility();
+});
+
+document.addEventListener('fullscreenchange', () => {
+  updateFullscreenButtonVisibility();
+});
+
+document.addEventListener('webkitfullscreenchange', () => {
+  updateFullscreenButtonVisibility();
+});
+
+overlayPanel?.addEventListener('scroll', () => {
   syncTouchPreviewVisibility();
 });
 
