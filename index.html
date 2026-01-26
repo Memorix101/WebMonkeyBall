@@ -55,7 +55,16 @@
 
       <label id="control-mode-field" class="field hidden">
         <span>Control Mode</span>
-        <select id="control-mode"></select>
+        <div class="control-mode-row">
+          <select id="control-mode"></select>
+          <button id="gyro-recalibrate" class="ghost compact hidden" type="button">Recalibrate</button>
+          <div id="gyro-helper" class="gyro-helper hidden" aria-hidden="true">
+            <div class="gyro-helper-frame">
+              <div id="gyro-helper-ghost" class="gyro-helper-ghost"></div>
+              <div id="gyro-helper-device" class="gyro-helper-device"></div>
+            </div>
+          </div>
+        </div>
       </label>
       <div id="smb1-fields">
         <label class="field">
@@ -149,11 +158,18 @@
     </div>
   </div>
 
+  <button id="mobile-menu-button" class="mobile-menu-button hidden" type="button">
+    Level Select
+  </button>
+
   <script type="module">
     const field = document.getElementById('control-mode-field');
     const select = document.getElementById('control-mode');
     const hasTouch = ('ontouchstart' in window) || ((navigator.maxTouchPoints ?? 0) > 0);
-    const hasGyro = typeof window.DeviceOrientationEvent !== 'undefined';
+    const hasCoarsePointer = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
+    const hasGyro = typeof window.DeviceOrientationEvent !== 'undefined' && (hasTouch || hasCoarsePointer);
+    const gyroButton = document.getElementById('gyro-recalibrate');
+    const gyroHelper = document.getElementById('gyro-helper');
 
     if (!field || !select || (!hasTouch && !hasGyro)) {
       field?.classList.add('hidden');
@@ -161,7 +177,7 @@
       field.classList.remove('hidden');
 
       const options = [];
-      //if (hasGyro) options.push({ value: 'gyro', label: 'Gyro' });
+      if (hasGyro) options.push({ value: 'gyro', label: 'Gyro' });
       if (hasTouch) options.push({ value: 'touch', label: 'Touchscreen' });
 
       select.replaceChildren(...options.map((opt) => {
@@ -179,6 +195,14 @@
         select.value = hasTouch ? 'touch' : 'gyro';
         localStorage.setItem(key, select.value);
       }
+
+      const syncGyroUi = () => {
+        const showGyro = select.value === 'gyro';
+        gyroButton?.classList.toggle('hidden', !showGyro);
+        gyroHelper?.classList.toggle('hidden', !showGyro);
+      };
+
+      syncGyroUi();
 
       select.addEventListener('change', async () => {
         let next = select.value;
@@ -198,6 +222,7 @@
         }
 
         localStorage.setItem(key, next);
+        syncGyroUi();
       });
     }
   </script>

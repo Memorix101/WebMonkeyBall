@@ -34,6 +34,16 @@ import type { StageData } from './noclip/SuperMonkeyBall/World.js';
 import { convertSmb2StageDef, getMb2wsStageInfo, getSmb2StageInfo } from './smb2_render.js';
 import { HudRenderer } from './hud.js';
 
+function clamp(value: number, min: number, max: number) {
+  if (value < min) {
+    return min;
+  }
+  if (value > max) {
+    return max;
+  }
+  return value;
+}
+
 const STAGE_BASE_PATH = STAGE_BASE_PATHS[GAME_SOURCES.SMB1];
 const NAOMI_STAGE_IDS = new Set([
   10, 19, 20, 30, 49, 50, 60, 70, 80, 92, 96, 97, 98, 99, 100, 114, 115, 116, 117, 118, 119, 120,
@@ -47,6 +57,11 @@ const canvas = document.getElementById('game') as HTMLCanvasElement;
 const hudCanvas = document.getElementById('hud-canvas') as HTMLCanvasElement;
 const overlay = document.getElementById('overlay') as HTMLElement;
 const stageFade = document.getElementById('stage-fade') as HTMLElement;
+const mobileMenuButton = document.getElementById('mobile-menu-button') as HTMLButtonElement | null;
+const controlModeSelect = document.getElementById('control-mode') as HTMLSelectElement | null;
+const gyroRecalibrateButton = document.getElementById('gyro-recalibrate') as HTMLButtonElement | null;
+const gyroHelper = document.getElementById('gyro-helper') as HTMLElement | null;
+const gyroHelperFrame = gyroHelper?.querySelector('.gyro-helper-frame') as HTMLElement | null;
 const startButton = document.getElementById('start') as HTMLButtonElement;
 const resumeButton = document.getElementById('resume') as HTMLButtonElement;
 const difficultySelect = document.getElementById('difficulty') as HTMLSelectElement;
@@ -69,10 +84,22 @@ const announcerVolumeValue = document.getElementById('announcer-volume-value') a
 
 const hudStatus = document.getElementById('hud-status') as HTMLElement | null;
 
-const setOverlayVisible = (visible: boolean) => {
+const hasTouch = ('ontouchstart' in window) || ((navigator.maxTouchPoints ?? 0) > 0);
+
+function updateMobileMenuButtonVisibility() {
+  if (!mobileMenuButton) {
+    return;
+  }
+  const shouldShow = hasTouch && overlay.classList.contains('hidden') && running;
+  mobileMenuButton.classList.toggle('hidden', !shouldShow);
+}
+
+function setOverlayVisible(visible: boolean) {
   overlay.classList.toggle('hidden', !visible);
   canvas.style.pointerEvents = visible ? 'none' : 'auto';
-};
+  document.body.classList.toggle('gameplay-active', !visible);
+  updateMobileMenuButtonVisibility();
+}
 
 const STAGE_FADE_MS = 333;
 
@@ -295,9 +322,11 @@ const game = new Game({
     resumeButton.disabled = false;
   },
   onPaused: () => {
+    paused = true;
     setOverlayVisible(true);
   },
   onResumed: () => {
+    paused = false;
     setOverlayVisible(false);
   },
   onStageLoaded: (stageId) => {
@@ -437,6 +466,7 @@ async function handleStageLoaded(stageId: number) {
     paused = false;
     renderReady = true;
     lastTime = performance.now();
+    updateMobileMenuButtonVisibility();
     maybeStartSmb2LikeStageFade();
     return;
   }
@@ -462,6 +492,7 @@ async function handleStageLoaded(stageId: number) {
   paused = false;
   renderReady = true;
   lastTime = performance.now();
+  updateMobileMenuButtonVisibility();
   maybeStartSmb2LikeStageFade();
 }
 
@@ -648,6 +679,7 @@ function renderFrame(now: number) {
   resizeCanvasToDisplaySize(canvas);
   resizeCanvasToDisplaySize(hudCanvas);
   hudRenderer.resize(hudCanvas.width, hudCanvas.height);
+  updateGyroHelper();
 
   if (game.loadingStage) {
     const hudDelta = now - lastHudTime;
@@ -697,6 +729,27 @@ function renderFrame(now: number) {
   gfxDevice.endFrame();
 
   hudRenderer.render(game, dtSeconds);
+}
+
+function updateGyroHelper() {
+  if (!controlModeSelect || !gyroHelper || !gyroHelperFrame) {
+    return;
+  }
+  const showGyro = controlModeSelect.value === 'gyro';
+  gyroHelper.classList.toggle('hidden', !showGyro);
+  if (!showGyro) {
+    return;
+  }
+  const sample = game.input?.getGyroSample?.();
+  if (!sample || !sample.hasSample) {
+    gyroHelperFrame.style.opacity = '0.5';
+    return;
+  }
+  const x = clamp(-sample.beta, -30, 30);
+  const y = clamp(sample.gamma, -30, 30);
+  gyroHelperFrame.style.opacity = '1';
+  gyroHelperFrame.style.setProperty('--gyro-x', `${x}deg`);
+  gyroHelperFrame.style.setProperty('--gyro-y', `${y}deg`);
 }
 
 setOverlayVisible(true);
@@ -757,6 +810,15 @@ resumeButton.addEventListener('click', () => {
   paused = false;
   void audio.resume();
   game.resume();
+});
+
+gyroRecalibrateButton?.addEventListener('click', () => {
+  game.input?.recalibrateGyro?.();
+});
+
+mobileMenuButton?.addEventListener('click', () => {
+  paused = true;
+  game.pause();
 });
 
 window.addEventListener('keydown', (event) => {

@@ -6,7 +6,8 @@ export class Input {
 
     this.controlModeKey = 'smb_control_mode';
     this.hasTouch = ('ontouchstart' in window) || ((navigator.maxTouchPoints ?? 0) > 0);
-    this.hasGyro = typeof window.DeviceOrientationEvent !== 'undefined';
+    const hasCoarsePointer = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
+    this.hasGyro = typeof window.DeviceOrientationEvent !== 'undefined' && (this.hasTouch || hasCoarsePointer);
 
     this.touch = {
       pointerId: null,
@@ -16,11 +17,21 @@ export class Input {
       value: { x: 0, y: 0 },
     };
 
+    this.touchAction = {
+      pointerId: null,
+      active: false,
+    };
+
     this.gyro = {
       baselineSet: false,
       baseBeta: 0,
       baseGamma: 0,
       value: { x: 0, y: 0 },
+    };
+    this.gyroRaw = {
+      beta: 0,
+      gamma: 0,
+      hasSample: false,
     };
 
     this.touchRoot = document.getElementById('touch-controls');
@@ -98,12 +109,42 @@ export class Input {
         if (event.pointerId === this.touch.pointerId) {
           this.endTouch();
         }
+        if (event.pointerId === this.touchAction.pointerId) {
+          this.endTouchAction();
+        }
       },
 
       pointercancel: (event) => {
         if (event.pointerId === this.touch.pointerId) {
           this.endTouch();
         }
+        if (event.pointerId === this.touchAction.pointerId) {
+          this.endTouchAction();
+        }
+      },
+
+      pointerdownAction: (event) => {
+        if (!this.hasTouch) {
+          return;
+        }
+        if (event.pointerType !== 'touch') {
+          return;
+        }
+        if (this.isOverlayVisible()) {
+          return;
+        }
+        if (event.target instanceof HTMLElement) {
+          const interactive = event.target.closest('button, input, select, textarea, a, label');
+          if (interactive) {
+            return;
+          }
+        }
+        if (this.touchAction.pointerId !== null) {
+          return;
+        }
+        event.preventDefault();
+        this.touchAction.pointerId = event.pointerId;
+        this.touchAction.active = true;
       },
 
       deviceorientation: (event) => {
@@ -116,6 +157,9 @@ export class Input {
 
         const beta = typeof event.beta === 'number' ? event.beta : 0;
         const gamma = typeof event.gamma === 'number' ? event.gamma : 0;
+        this.gyroRaw.beta = beta;
+        this.gyroRaw.gamma = gamma;
+        this.gyroRaw.hasSample = true;
 
         if (!this.gyro.baselineSet) {
           this.gyro.baselineSet = true;
@@ -150,6 +194,9 @@ export class Input {
       window.addEventListener('pointerup', this.handlers.pointerup);
       window.addEventListener('pointercancel', this.handlers.pointercancel);
     }
+    if (this.hasTouch) {
+      window.addEventListener('pointerdown', this.handlers.pointerdownAction, { passive: false });
+    }
 
     if (this.hasGyro) {
       window.addEventListener('deviceorientation', this.handlers.deviceorientation);
@@ -168,6 +215,9 @@ export class Input {
       window.removeEventListener('pointermove', this.handlers.pointermove);
       window.removeEventListener('pointerup', this.handlers.pointerup);
       window.removeEventListener('pointercancel', this.handlers.pointercancel);
+    }
+    if (this.hasTouch) {
+      window.removeEventListener('pointerdown', this.handlers.pointerdownAction);
     }
 
     if (this.hasGyro) {
@@ -254,8 +304,37 @@ export class Input {
     this.hideJoystick();
   }
 
+  endTouchAction() {
+    this.touchAction.active = false;
+    this.touchAction.pointerId = null;
+  }
+
   isDown(code) {
     return this.down.has(code);
+  }
+
+  recalibrateGyro() {
+    if (!this.hasGyro) {
+      return;
+    }
+    if (this.gyroRaw.hasSample) {
+      this.gyro.baseBeta = this.gyroRaw.beta;
+      this.gyro.baseGamma = this.gyroRaw.gamma;
+      this.gyro.baselineSet = true;
+    } else {
+      this.gyro.baselineSet = false;
+    }
+  }
+
+  getGyroSample() {
+    return {
+      beta: this.gyroRaw.beta,
+      gamma: this.gyroRaw.gamma,
+      baseBeta: this.gyro.baseBeta,
+      baseGamma: this.gyro.baseGamma,
+      baselineSet: this.gyro.baselineSet,
+      hasSample: this.gyroRaw.hasSample,
+    };
   }
 
   wasPressed(code) {
@@ -295,6 +374,9 @@ export class Input {
 
   isPrimaryActionDown() {
     if (this.isDown('Space') || this.isDown('Enter') || this.isDown('KeyZ')) {
+      return true;
+    }
+    if (this.touchAction.active) {
       return true;
     }
     const pad = this.getActiveGamepad();
