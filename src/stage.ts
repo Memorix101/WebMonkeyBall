@@ -1533,9 +1533,93 @@ export class StageRuntime {
     } else {
       this.timerFrames += frameDelta;
     }
+    if (this.format === 'smb2') {
+      this.updateSwitchesSmb2PreAnim();
+    }
     this.updateAnimGroups(this.timerFrames / 60, frameDelta, smb2LoadInFrames);
     if (world) {
       this.updateObjects(world, ball, camera);
+    }
+  }
+
+  updateSwitchesSmb2PreAnim() {
+    const stack = this.matrixStack;
+    for (const stageSwitch of this.switches) {
+      stageSwitch.prevPos.x = stageSwitch.pos.x;
+      stageSwitch.prevPos.y = stageSwitch.pos.y;
+      stageSwitch.prevPos.z = stageSwitch.pos.z;
+      const playbackState = stageSwitch.type & 7;
+      const groupMatches = this.isAnimGroupInPlaybackState(stageSwitch.animGroupId, playbackState);
+      if (stageSwitch.state === 2) {
+        stageSwitch.state = 3;
+      }
+      if (stageSwitch.state < 2) {
+        if (stageSwitch.state === 0) {
+          stageSwitch.state = 1;
+          stageSwitch.pressImpulse = false;
+          stageSwitch.triggered = false;
+        }
+        stageSwitch.localVel.y += -stageSwitch.localPos.y * 0.1;
+        stageSwitch.localVel.y *= 0.95;
+        stageSwitch.localPos.y += stageSwitch.localVel.y;
+        if (stageSwitch.localPos.y < -0.1) {
+          stageSwitch.localPos.y = -0.1;
+          if (stageSwitch.localVel.y < 0) {
+            stageSwitch.localVel.y *= -0.8;
+          }
+        } else if (stageSwitch.localPos.y > 0.1) {
+          stageSwitch.localPos.y = 0.1;
+          if (stageSwitch.localVel.y > 0) {
+            stageSwitch.localVel.y *= -0.8;
+          }
+        }
+        if (groupMatches) {
+          stageSwitch.state = 2;
+          if (!stageSwitch.triggered) {
+            this.applySwitchPlayback(stageSwitch, false);
+            stageSwitch.triggered = true;
+          }
+        }
+        if (stageSwitch.pressImpulse && stageSwitch.localPos.y < -0.025) {
+          stageSwitch.state = 2;
+          if (!stageSwitch.triggered) {
+            this.switchPressCount = (this.switchPressCount ?? 0) + 1;
+            this.applySwitchPlayback(stageSwitch, false);
+            stageSwitch.triggered = true;
+          }
+        }
+      } else if (!groupMatches) {
+        stageSwitch.state = 0;
+      }
+      if (stageSwitch.state >= 2) {
+        stageSwitch.localVel.y += (-0.1 - stageSwitch.localPos.y) * 0.1;
+        stageSwitch.localVel.y *= 0.9;
+        stageSwitch.localPos.y += stageSwitch.localVel.y;
+        if (stageSwitch.localPos.y < -0.1) {
+          stageSwitch.localPos.y = -0.1;
+          if (stageSwitch.localVel.y < 0) {
+            stageSwitch.localVel.y *= -0.8;
+          }
+        } else if (stageSwitch.localPos.y > 0) {
+          stageSwitch.localPos.y = 0;
+          if (stageSwitch.localVel.y > 0) {
+            stageSwitch.localVel.y *= -0.8;
+          }
+        }
+      }
+      stack.fromIdentity();
+      stack.rotateZ(stageSwitch.rot.z);
+      stack.rotateY(stageSwitch.rot.y);
+      stack.rotateX(stageSwitch.rot.x);
+      const localPos = {
+        x: stageSwitch.localPos.x,
+        y: stageSwitch.localPos.y,
+        z: stageSwitch.localPos.z,
+      };
+      stack.tfPoint(localPos, localPos);
+      stageSwitch.pos.x = stageSwitch.basePos.x + localPos.x;
+      stageSwitch.pos.y = stageSwitch.basePos.y + localPos.y;
+      stageSwitch.pos.z = stageSwitch.basePos.z + localPos.z;
     }
   }
 
@@ -1872,82 +1956,84 @@ export class StageRuntime {
         stageSwitch.cooldown -= 1;
       }
     }
-    for (const stageSwitch of this.switches) {
-      stageSwitch.prevPos.x = stageSwitch.pos.x;
-      stageSwitch.prevPos.y = stageSwitch.pos.y;
-      stageSwitch.prevPos.z = stageSwitch.pos.z;
-      const playbackState = stageSwitch.type & 7;
-      const groupMatches = this.isAnimGroupInPlaybackState(stageSwitch.animGroupId, playbackState);
-      if (stageSwitch.state === 2) {
-        stageSwitch.state = 3;
+    if (this.format !== 'smb2') {
+      for (const stageSwitch of this.switches) {
+        stageSwitch.prevPos.x = stageSwitch.pos.x;
+        stageSwitch.prevPos.y = stageSwitch.pos.y;
+        stageSwitch.prevPos.z = stageSwitch.pos.z;
+        const playbackState = stageSwitch.type & 7;
+        const groupMatches = this.isAnimGroupInPlaybackState(stageSwitch.animGroupId, playbackState);
+        if (stageSwitch.state === 2) {
+          stageSwitch.state = 3;
+        }
+        if (stageSwitch.state < 2) {
+          if (stageSwitch.state === 0) {
+            stageSwitch.state = 1;
+            stageSwitch.pressImpulse = false;
+            stageSwitch.triggered = false;
+          }
+          stageSwitch.localVel.y += -stageSwitch.localPos.y * 0.1;
+          stageSwitch.localVel.y *= 0.95;
+          stageSwitch.localPos.y += stageSwitch.localVel.y;
+          if (stageSwitch.localPos.y < -0.1) {
+            stageSwitch.localPos.y = -0.1;
+            if (stageSwitch.localVel.y < 0) {
+              stageSwitch.localVel.y *= -0.8;
+            }
+          } else if (stageSwitch.localPos.y > 0.1) {
+            stageSwitch.localPos.y = 0.1;
+            if (stageSwitch.localVel.y > 0) {
+              stageSwitch.localVel.y *= -0.8;
+            }
+          }
+          if (groupMatches) {
+            stageSwitch.state = 2;
+            if (!stageSwitch.triggered) {
+              this.applySwitchPlayback(stageSwitch, false);
+              stageSwitch.triggered = true;
+            }
+          }
+          if (stageSwitch.pressImpulse && stageSwitch.localPos.y < -0.025) {
+            stageSwitch.state = 2;
+            if (!stageSwitch.triggered) {
+              this.switchPressCount = (this.switchPressCount ?? 0) + 1;
+              this.applySwitchPlayback(stageSwitch, false);
+              stageSwitch.triggered = true;
+            }
+          }
+        } else if (!groupMatches) {
+          stageSwitch.state = 0;
+        }
+        if (stageSwitch.state >= 2) {
+          stageSwitch.localVel.y += (-0.1 - stageSwitch.localPos.y) * 0.1;
+          stageSwitch.localVel.y *= 0.9;
+          stageSwitch.localPos.y += stageSwitch.localVel.y;
+          if (stageSwitch.localPos.y < -0.1) {
+            stageSwitch.localPos.y = -0.1;
+            if (stageSwitch.localVel.y < 0) {
+              stageSwitch.localVel.y *= -0.8;
+            }
+          } else if (stageSwitch.localPos.y > 0) {
+            stageSwitch.localPos.y = 0;
+            if (stageSwitch.localVel.y > 0) {
+              stageSwitch.localVel.y *= -0.8;
+            }
+          }
+        }
+        stack.fromIdentity();
+        stack.rotateZ(stageSwitch.rot.z);
+        stack.rotateY(stageSwitch.rot.y);
+        stack.rotateX(stageSwitch.rot.x);
+        const localPos = {
+          x: stageSwitch.localPos.x,
+          y: stageSwitch.localPos.y,
+          z: stageSwitch.localPos.z,
+        };
+        stack.tfPoint(localPos, localPos);
+        stageSwitch.pos.x = stageSwitch.basePos.x + localPos.x;
+        stageSwitch.pos.y = stageSwitch.basePos.y + localPos.y;
+        stageSwitch.pos.z = stageSwitch.basePos.z + localPos.z;
       }
-      if (stageSwitch.state < 2) {
-        if (stageSwitch.state === 0) {
-          stageSwitch.state = 1;
-          stageSwitch.pressImpulse = false;
-          stageSwitch.triggered = false;
-        }
-        stageSwitch.localVel.y += -stageSwitch.localPos.y * 0.1;
-        stageSwitch.localVel.y *= 0.95;
-        stageSwitch.localPos.y += stageSwitch.localVel.y;
-        if (stageSwitch.localPos.y < -0.1) {
-          stageSwitch.localPos.y = -0.1;
-          if (stageSwitch.localVel.y < 0) {
-            stageSwitch.localVel.y *= -0.8;
-          }
-        } else if (stageSwitch.localPos.y > 0.1) {
-          stageSwitch.localPos.y = 0.1;
-          if (stageSwitch.localVel.y > 0) {
-            stageSwitch.localVel.y *= -0.8;
-          }
-        }
-        if (groupMatches) {
-          stageSwitch.state = 2;
-          if (this.format === 'smb2' && !stageSwitch.triggered) {
-            this.applySwitchPlayback(stageSwitch, false);
-            stageSwitch.triggered = true;
-          }
-        }
-        if (stageSwitch.pressImpulse && stageSwitch.localPos.y < -0.025) {
-          stageSwitch.state = 2;
-          if (this.format === 'smb2' && !stageSwitch.triggered) {
-            this.switchPressCount = (this.switchPressCount ?? 0) + 1;
-            this.applySwitchPlayback(stageSwitch, false);
-            stageSwitch.triggered = true;
-          }
-        }
-      } else if (!groupMatches) {
-        stageSwitch.state = 0;
-      }
-      if (stageSwitch.state >= 2) {
-        stageSwitch.localVel.y += (-0.1 - stageSwitch.localPos.y) * 0.1;
-        stageSwitch.localVel.y *= 0.9;
-        stageSwitch.localPos.y += stageSwitch.localVel.y;
-        if (stageSwitch.localPos.y < -0.1) {
-          stageSwitch.localPos.y = -0.1;
-          if (stageSwitch.localVel.y < 0) {
-            stageSwitch.localVel.y *= -0.8;
-          }
-        } else if (stageSwitch.localPos.y > 0) {
-          stageSwitch.localPos.y = 0;
-          if (stageSwitch.localVel.y > 0) {
-            stageSwitch.localVel.y *= -0.8;
-          }
-        }
-      }
-      stack.fromIdentity();
-      stack.rotateZ(stageSwitch.rot.z);
-      stack.rotateY(stageSwitch.rot.y);
-      stack.rotateX(stageSwitch.rot.x);
-      const localPos = {
-        x: stageSwitch.localPos.x,
-        y: stageSwitch.localPos.y,
-        z: stageSwitch.localPos.z,
-      };
-      stack.tfPoint(localPos, localPos);
-      stageSwitch.pos.x = stageSwitch.basePos.x + localPos.x;
-      stageSwitch.pos.y = stageSwitch.basePos.y + localPos.y;
-      stageSwitch.pos.z = stageSwitch.basePos.z + localPos.z;
     }
     this.syncObjectTransforms();
   }
