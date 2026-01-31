@@ -683,19 +683,6 @@ function collideBallWithTriFace(ball, tri) {
 function collideBallWithTriEdge(ball, ballPosTri, ballPrevPosTri, edge) {
   stack.push();
   stack.fromIdentity();
-  const debug = (globalThis as any).__DETERMINISM_DEBUG__;
-  if (debug?.edgeNormals) {
-    const sum = Math.abs(edge.normal.x) + Math.abs(edge.normal.y);
-    if (sum <= debug.edgeEps) {
-      debug.edgeNormals.push({
-        tick: debug.tick ?? null,
-        normal: { x: edge.normal.x, y: edge.normal.y },
-        edgeStart: { x: edge.start.x, y: edge.start.y },
-        edgeEnd: { x: edge.end.x, y: edge.end.y },
-        sum,
-      });
-    }
-  }
   stack.translateXYZ(edge.start.x, edge.start.y, 0);
   const edgeNormalLenSq = sumSq2(edge.normal.x, edge.normal.y);
   if (edgeNormalLenSq > FLT_EPSILON) {

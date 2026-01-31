@@ -94,36 +94,6 @@ function atanS16(value) {
   return result * sign;
 }
 
-function atanS16WithDetail(value) {
-  if (value === 0) {
-    return { angle: 0, index: 0, raw: 0 };
-  }
-  let sign = 1;
-  let x = value;
-  if (x < 0) {
-    sign = -1;
-    x = -x;
-  }
-  if (x === 1) {
-    return { angle: sign * 0x2000, index: 0, raw: 0x2000 };
-  }
-  let invert = false;
-  if (x > 1) {
-    x = 1 / x;
-    invert = true;
-  }
-  x = f32(x);
-  const index = atanIndex(x);
-  const slope = ATAN_TABLE[index * 2];
-  const intercept = ATAN_TABLE[index * 2 + 1];
-  const angle = f32(f32(x * slope) + intercept);
-  let result = roundToNearestEven(angle);
-  if (invert) {
-    result = 0x4000 - result;
-  }
-  return { angle: result * sign, index, raw: angle };
-}
-
 export function atan2S16(y, x) {
   const yy = f32(y);
   const xx = f32(x);
@@ -133,24 +103,13 @@ export function atan2S16(y, x) {
   const ay = Math.abs(yy);
   const ax = Math.abs(xx);
   let angle;
-  let ratio = 0;
-  let atanIndexUsed = -1;
-  let atanRaw = 0;
   if (ay === ax) {
     angle = ay === 0 ? 0 : 0x2000;
   } else if (ay > ax) {
-    ratio = ax / ay;
-    const atanDetail = atanS16WithDetail(ratio);
-    atanIndexUsed = atanDetail.index;
-    atanRaw = atanDetail.raw;
-    angle = atanDetail.angle;
+    angle = atanS16(ax / ay);
     angle = 0x4000 - angle;
   } else {
-    ratio = ay / ax;
-    const atanDetail = atanS16WithDetail(ratio);
-    atanIndexUsed = atanDetail.index;
-    atanRaw = atanDetail.raw;
-    angle = atanDetail.angle;
+    angle = atanS16(ay / ax);
   }
   if (xx < 0) {
     if (yy >= 0) {
@@ -161,30 +120,7 @@ export function atan2S16(y, x) {
   } else if (yy < 0) {
     angle = -angle;
   }
-  const result = toS16(angle);
-  const debug = (globalThis as any).__DETERMINISM_DEBUG__;
-  if (debug?.atan2 && debug.remaining > 0) {
-    const sum = Math.abs(yy) + Math.abs(xx);
-    if (sum <= (debug.eps ?? 0)) {
-      debug.remaining -= 1;
-      if (debug.records) {
-        const stack = debug.stack ? new Error().stack : null;
-        debug.records.push({
-          tick: debug.tick ?? null,
-          source: debug.source ?? null,
-          x: xx,
-          y: yy,
-          angle: result,
-          sum,
-          ratio,
-          atanIndexUsed,
-          atanRaw,
-          stack,
-        });
-      }
-    }
-  }
-  return result;
+  return toS16(angle);
 }
 
 export function atan2S16Safe(y, x, eps = EPSILON) {
@@ -192,56 +128,6 @@ export function atan2S16Safe(y, x, eps = EPSILON) {
     return 0;
   }
   return atan2S16(y, x);
-}
-
-export function atan2S16Detail(y, x) {
-  const yy = f32(y);
-  const xx = f32(x);
-  if (yy === 0 && xx === 0) {
-    return {
-      angle: 0,
-      ratio: 0,
-      atanIndexUsed: 0,
-      atanRaw: 0,
-    };
-  }
-  const ay = Math.abs(yy);
-  const ax = Math.abs(xx);
-  let angle;
-  let ratio = 0;
-  let atanIndexUsed = -1;
-  let atanRaw = 0;
-  if (ay === ax) {
-    angle = ay === 0 ? 0 : 0x2000;
-  } else if (ay > ax) {
-    ratio = ax / ay;
-    const atanDetail = atanS16WithDetail(ratio);
-    atanIndexUsed = atanDetail.index;
-    atanRaw = atanDetail.raw;
-    angle = 0x4000 - atanDetail.angle;
-  } else {
-    ratio = ay / ax;
-    const atanDetail = atanS16WithDetail(ratio);
-    atanIndexUsed = atanDetail.index;
-    atanRaw = atanDetail.raw;
-    angle = atanDetail.angle;
-  }
-
-  if (xx < 0) {
-    if (yy >= 0) {
-      angle = 0x8000 - angle;
-    } else {
-      angle = angle - 0x8000;
-    }
-  } else if (yy < 0) {
-    angle = -angle;
-  }
-  return {
-    angle: toS16(angle),
-    ratio,
-    atanIndexUsed,
-    atanRaw,
-  };
 }
 
 export function sumSq2(x, y) {

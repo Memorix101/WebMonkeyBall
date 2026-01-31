@@ -2523,18 +2523,8 @@ function updateGoalBag(bag, animGroups, gravity, holdOpen, stack, rng) {
   stack.fromRotateY(-bag.rotY);
   stack.rotateX(0);
   stack.tfVec(rotVec, rotVec);
-  const debug = (globalThis as any).__DETERMINISM_DEBUG__;
-  if (debug) {
-    debug.source = 'goalBagRotX';
-  }
   bag.rotX = atan2S16Safe(rotVec.z, rotVec.y) - 0x8000;
-  if (debug) {
-    debug.source = 'goalBagRotZ';
-  }
   bag.rotZ = atan2S16Safe(rotVec.x, sqrt(sumSq2(rotVec.z, rotVec.y)));
-  if (debug) {
-    debug.source = null;
-  }
 
   updateGoalBagTransform(bag, stack);
 }

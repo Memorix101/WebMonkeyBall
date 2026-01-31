@@ -1862,10 +1862,6 @@ export class Game {
       }
       this.stageRuntime.goalHoldOpen = this.goalTimerFrames > 0;
       while (!this.pendingAdvance && this.accumulator >= this.fixedStep) {
-        const debug = (globalThis as any).__DETERMINISM_DEBUG__;
-        if (debug) {
-          debug.tick = this.simTick;
-        }
         const tickStart = this.simPerf.enabled ? nowMs() : 0;
         try {
         const ringoutActive = this.ringoutTimerFrames > 0;
