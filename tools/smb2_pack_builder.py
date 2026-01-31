@@ -682,6 +682,188 @@ def build_pack(
             print(f'  - {warning}')
 
 
+def load_vanilla_courses_from_rom(
+    rom_dir: Path,
+) -> Tuple[Dict[str, List[Tuple[int, bool]]], List[List[int]], Dict[int, int], List[str]]:
+    try:
+        from dump_vanilla_conf import load_vanilla_course_data
+    except Exception as exc:
+        raise RuntimeError(f'failed to import dump_vanilla_conf: {exc}') from exc
+
+    data = load_vanilla_course_data(rom_dir)
+    challenge = data.get('challenge') if isinstance(data, dict) else None
+    story = data.get('story') if isinstance(data, dict) else None
+
+    course_name_map = {
+        'beginner': 'Beginner',
+        'beginner_extra': 'Beginner Extra',
+        'advanced': 'Advanced',
+        'advanced_extra': 'Advanced Extra',
+        'expert': 'Expert',
+        'expert_extra': 'Expert Extra',
+        'master': 'Master',
+        'master_extra': 'Master Extra',
+    }
+
+    challenge_courses: Dict[str, List[Tuple[int, bool]]] = {}
+    story_worlds: List[List[int]] = []
+    stage_time_overrides: Dict[int, int] = {}
+    warnings: List[str] = []
+    default_time = 60.0
+
+    def register_time_override(stage_id: int, time_limit: Optional[float]) -> None:
+        if time_limit is None:
+            return
+        if abs(time_limit - default_time) < 0.01:
+            return
+        frames = int(round(time_limit * 60))
+        existing = stage_time_overrides.get(stage_id)
+        if existing is not None and existing != frames:
+            warnings.append(
+                f'stage {stage_id} has conflicting time limits ({existing} vs {frames} frames)'
+            )
+            return
+        stage_time_overrides[stage_id] = frames
+
+    if isinstance(challenge, dict):
+        for key, entries in challenge.items():
+            name = course_name_map.get(key, key)
+            course_entries: List[Tuple[int, bool]] = []
+            if isinstance(entries, list):
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    stage_id = entry.get('stage_id')
+                    if not isinstance(stage_id, int):
+                        continue
+                    bonus = bool(entry.get('is_bonus_stage'))
+                    course_entries.append((stage_id, bonus))
+                    register_time_override(stage_id, entry.get('time_limit'))
+            if course_entries:
+                challenge_courses[name] = course_entries
+
+    if isinstance(story, list):
+        for world in story:
+            world_entries: List[int] = []
+            if isinstance(world, list):
+                for entry in world:
+                    if not isinstance(entry, dict):
+                        continue
+                    stage_id = entry.get('stage_id')
+                    if not isinstance(stage_id, int):
+                        continue
+                    world_entries.append(stage_id)
+                    register_time_override(stage_id, entry.get('time_limit'))
+            if world_entries:
+                story_worlds.append(world_entries)
+
+    if not story_worlds:
+        warnings.append('Story mode data not found; leaving story worlds empty.')
+
+    return challenge_courses, story_worlds, stage_time_overrides, warnings
+
+
+def parse_cmmod_config(config_path: Path) -> Tuple[
+    Dict[str, List[Tuple[int, bool]]],
+    Dict[int, int],
+    List[str],
+]:
+    warnings: List[str] = []
+    entry_lists: Dict[str, List[Tuple[int, Optional[int]]]] = {}
+    diff_map: Dict[str, str] = {}
+
+    def parse_num(token: str) -> Optional[int]:
+        try:
+            return int(token, 0)
+        except ValueError:
+            return None
+
+    current_list: Optional[str] = None
+    for raw_line in config_path.read_text(encoding='utf-8', errors='ignore').splitlines():
+        line = raw_line.split('%', 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith('#beginEntryList'):
+            parts = line.split()
+            if len(parts) >= 2:
+                current_list = parts[1]
+                entry_lists[current_list] = []
+            else:
+                warnings.append('Malformed #beginEntryList line')
+            continue
+        if line.startswith('#endEntryList'):
+            current_list = None
+            continue
+        if line.startswith('#diff'):
+            parts = line.split()
+            if len(parts) >= 3:
+                diff_name = parts[1]
+                list_name = parts[2]
+                diff_map[diff_name] = list_name
+            else:
+                warnings.append('Malformed #diff line')
+            continue
+        if line.startswith('#'):
+            continue
+        if current_list is None:
+            continue
+        left = line.split('|', 1)[0].strip()
+        if not left:
+            continue
+        tokens = left.split()
+        stage_id = parse_num(tokens[0])
+        if stage_id is None:
+            warnings.append(f'Invalid stage id in line: {raw_line}')
+            continue
+        time_override: Optional[int] = None
+        if len(tokens) >= 2:
+            time_val = parse_num(tokens[1])
+            if time_val is None:
+                warnings.append(f'Invalid time in line: {raw_line}')
+            elif time_val != 3600:
+                time_override = time_val
+        entry_lists.setdefault(current_list, []).append((stage_id, time_override))
+
+    diff_name_map = {
+        'Beginner': 'Beginner',
+        'Advanced': 'Advanced',
+        'Expert': 'Expert',
+        'BeginnerExtra': 'Beginner Extra',
+        'AdvancedExtra': 'Advanced Extra',
+        'ExpertExtra': 'Expert Extra',
+        'Master': 'Master',
+        'MasterExtra': 'Master Extra',
+    }
+
+    challenge_courses: Dict[str, List[Tuple[int, bool]]] = {}
+    stage_time_overrides: Dict[int, int] = {}
+
+    for diff_name, list_name in diff_map.items():
+        display_name = diff_name_map.get(diff_name)
+        if not display_name:
+            continue
+        entries = entry_lists.get(list_name)
+        if not entries:
+            warnings.append(f'Missing entry list for {diff_name}: {list_name}')
+            continue
+        challenge_courses[display_name] = [(stage_id, False) for stage_id, _ in entries]
+        for stage_id, time_override in entries:
+            if time_override is None:
+                continue
+            existing = stage_time_overrides.get(stage_id)
+            if existing is not None and existing != time_override:
+                warnings.append(
+                    f'stage {stage_id} has conflicting time limits ({existing} vs {time_override})'
+                )
+                continue
+            stage_time_overrides[stage_id] = time_override
+
+    if not challenge_courses:
+        warnings.append('No challenge courses found in cmmod config.')
+
+    return challenge_courses, stage_time_overrides, warnings
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Build SMB2 pack from extracted ROM.')
     parser.add_argument('--rom', type=Path, help='Path to extracted SMB2 ROM folder')
@@ -727,18 +909,27 @@ def run_gui() -> None:
     lst_var = tk.StringVar()
     zip_var = tk.BooleanVar(value=True)
 
-    def browse_dir(target_var: tk.StringVar):
-        value = filedialog.askdirectory()
+    last_rom_dir = ''
+    last_out_dir = ''
+
+    def browse_dir(target_var: tk.StringVar, last_dir_attr: str):
+        nonlocal last_rom_dir, last_out_dir
+        initial = last_rom_dir if last_dir_attr == 'rom' else last_out_dir
+        value = filedialog.askdirectory(initialdir=initial or None)
         if value:
             target_var.set(value)
+            if last_dir_attr == 'rom':
+                last_rom_dir = value
+            else:
+                last_out_dir = value
 
     ttk.Label(config_frame, text='ROM folder').grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
     ttk.Entry(config_frame, textvariable=rom_var, width=60).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
-    ttk.Button(config_frame, text='Browse', command=lambda: browse_dir(rom_var)).grid(row=0, column=2, padx=4, pady=4)
+    ttk.Button(config_frame, text='Browse', command=lambda: browse_dir(rom_var, 'rom')).grid(row=0, column=2, padx=4, pady=4)
 
     ttk.Label(config_frame, text='Output folder').grid(row=1, column=0, sticky=tk.W, padx=4, pady=4)
     ttk.Entry(config_frame, textvariable=out_var, width=60).grid(row=1, column=1, sticky=tk.W, padx=4, pady=4)
-    ttk.Button(config_frame, text='Browse', command=lambda: browse_dir(out_var)).grid(row=1, column=2, padx=4, pady=4)
+    ttk.Button(config_frame, text='Browse', command=lambda: browse_dir(out_var, 'out')).grid(row=1, column=2, padx=4, pady=4)
 
     ttk.Label(config_frame, text='Pack ID').grid(row=2, column=0, sticky=tk.W, padx=4, pady=4)
     ttk.Entry(config_frame, textvariable=pack_id_var, width=30).grid(row=2, column=1, sticky=tk.W, padx=4, pady=4)
@@ -758,6 +949,9 @@ def run_gui() -> None:
 
     courses_frame = ttk.Frame(frame)
     courses_frame.pack(fill=tk.BOTH, expand=True)
+
+    load_controls = ttk.Frame(courses_frame)
+    load_controls.pack(fill=tk.X, pady=(0, 8))
 
     challenge_frame = ttk.LabelFrame(courses_frame, text='Challenge Courses', padding=10)
     story_frame = ttk.LabelFrame(courses_frame, text='Story Worlds', padding=10)
@@ -1023,6 +1217,69 @@ def run_gui() -> None:
             courses['story'] = story_worlds
         return courses
 
+    def load_from_rom_clicked():
+        rom_path = Path(rom_var.get().strip())
+        if not rom_path.exists():
+            messagebox.showerror('Invalid ROM', 'ROM folder does not exist.')
+            return
+        if challenge_courses or story_worlds:
+            if not messagebox.askyesno(
+                'Replace courses',
+                'Replace current course data with values from the ROM?',
+            ):
+                return
+        try:
+            loaded_courses, loaded_worlds, loaded_overrides, load_warnings = (
+                load_vanilla_courses_from_rom(rom_path)
+            )
+        except Exception as exc:
+            messagebox.showerror('Load failed', str(exc))
+            return
+        challenge_courses.clear()
+        challenge_courses.update(loaded_courses)
+        story_worlds.clear()
+        story_worlds.extend(loaded_worlds)
+        stage_time_overrides.clear()
+        stage_time_overrides.update(loaded_overrides)
+        selected_course_name.set('')
+        refresh_course_list()
+        refresh_stage_list()
+        refresh_world_list()
+        refresh_world_stage_list()
+        if load_warnings:
+            messagebox.showwarning('Loaded with warnings', '\n'.join(load_warnings))
+
+    def load_from_cmmod_clicked():
+        config_path_str = filedialog.askopenfilename(
+            title='Select cmmod config',
+            filetypes=[('Config files', '*.txt *.cfg'), ('All files', '*.*')],
+        )
+        if not config_path_str:
+            return
+        config_path = Path(config_path_str)
+        if challenge_courses or story_worlds:
+            if not messagebox.askyesno(
+                'Replace courses',
+                'Replace current challenge courses with values from the cmmod config?',
+            ):
+                return
+        try:
+            loaded_courses, loaded_overrides, load_warnings = parse_cmmod_config(config_path)
+        except Exception as exc:
+            messagebox.showerror('Load failed', str(exc))
+            return
+        challenge_courses.clear()
+        challenge_courses.update(loaded_courses)
+        stage_time_overrides.clear()
+        stage_time_overrides.update(loaded_overrides)
+        selected_course_name.set('')
+        refresh_course_list()
+        refresh_stage_list()
+        if story_worlds:
+            load_warnings.append('Story worlds were left unchanged.')
+        if load_warnings:
+            messagebox.showwarning('Loaded with warnings', '\n'.join(load_warnings))
+
     def build_pack_clicked():
         rom_path = Path(rom_var.get().strip())
         out_path = Path(out_var.get().strip())
@@ -1061,6 +1318,7 @@ def run_gui() -> None:
     action_frame = ttk.Frame(frame)
     action_frame.pack(fill=tk.X, pady=(10, 0))
     ttk.Button(action_frame, text='Build Pack', command=build_pack_clicked).pack(side=tk.RIGHT)
+    ttk.Button(load_controls, text='Load courses from cmmod config', command=load_from_cmmod_clicked).pack(side=tk.LEFT)
 
     root.mainloop()
 
