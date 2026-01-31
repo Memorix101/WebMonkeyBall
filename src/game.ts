@@ -342,6 +342,7 @@ export class Game {
   public autoRecordInputs: boolean;
   public inputStartTick: number;
   public replayInputStartTick: number | null;
+  public replayAutoFastForward: boolean;
 
   constructor({
     hud,
@@ -440,6 +441,7 @@ export class Game {
     this.autoRecordInputs = true;
     this.inputStartTick = 0;
     this.replayInputStartTick = null;
+    this.replayAutoFastForward = false;
   }
 
   setGameSource(source: GameSource) {
@@ -464,10 +466,12 @@ export class Game {
     if (enabled) {
       this.inputRecord = null;
       this.replayInputStartTick = 0;
+      this.replayAutoFastForward = true;
     } else {
       this.inputFeed = null;
       this.inputFeedIndex = 0;
       this.replayInputStartTick = null;
+      this.replayAutoFastForward = false;
     }
   }
 
@@ -1308,6 +1312,16 @@ export class Game {
       }
 
       this.resetBallForStage({ withIntro: true });
+      if (this.replayInputStartTick !== null) {
+        const startTick = Math.max(0, this.replayInputStartTick);
+        this.introTotalFrames = startTick;
+        this.introTimerFrames = startTick;
+        if (this.ball) {
+          this.cameraController?.initForStage(this.ball, this.ball.startRotY, this.stageRuntime);
+        }
+        this.replayAutoFastForward = true;
+        this.setFixedTickMode(true, 1);
+      }
 
       void this.audio?.playMusicForStage(stageId, this.gameSource);
       this.statusText = '';
@@ -2023,6 +2037,12 @@ export class Game {
             this.simPerf.tickCount += 1;
           }
           this.simTick += 1;
+          if (this.replayAutoFastForward && this.replayInputStartTick !== null) {
+            if (this.simTick >= this.replayInputStartTick) {
+              this.replayAutoFastForward = false;
+              this.setFixedTickMode(false, 1);
+            }
+          }
         }
       }
       if (this.simPerf.enabled && this.simPerf.tickCount >= this.simPerf.logEvery) {

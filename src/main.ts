@@ -895,6 +895,11 @@ async function startReplay(replay: ReplayData) {
     hudStatus.textContent = '';
   }
   game.setReplayMode(true, true);
+  activeGameSource = replay.gameSource;
+  if (gameSourceSelect) {
+    gameSourceSelect.value = replay.gameSource;
+  }
+  updateGameSourceFields();
   game.setGameSource(replay.gameSource);
   game.stageBasePath = getStageBasePath(replay.gameSource);
   currentSmb2LikeMode = null;
@@ -913,6 +918,7 @@ async function startReplay(replay: ReplayData) {
   while (game.simTick < game.replayInputStartTick) {
     game.update(game.fixedStep);
   }
+  game.replayAutoFastForward = false;
   game.setFixedTickMode(false, 1);
   setReplayStatus(`Replay loaded (stage ${replay.stageId})`);
 }
