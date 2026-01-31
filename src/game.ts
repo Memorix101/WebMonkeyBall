@@ -17,6 +17,7 @@ import { intersectsMovingSpheres, tfPhysballToAnimGroupSpace } from './collision
 import { MatrixStack, sqrt, toS16 } from './math.js';
 import { GameplayCamera } from './camera.js';
 import { dequantizeStick, quantizeStick, type QuantizedStick } from './determinism.js';
+import { createReplayData, type ReplayData } from './replay.js';
 import {
   checkBallEnteredGoal,
   createBallState,
@@ -338,6 +339,9 @@ export class Game {
   public inputRecord: QuantizedStick[] | null;
   public fixedTickMode: boolean;
   public fixedTicksPerUpdate: number;
+  public autoRecordInputs: boolean;
+  public inputStartTick: number;
+  public replayInputStartTick: number | null;
 
   constructor({
     hud,
@@ -433,6 +437,9 @@ export class Game {
     this.inputRecord = null;
     this.fixedTickMode = false;
     this.fixedTicksPerUpdate = 1;
+    this.autoRecordInputs = true;
+    this.inputStartTick = 0;
+    this.replayInputStartTick = null;
   }
 
   setGameSource(source: GameSource) {
@@ -451,6 +458,19 @@ export class Game {
     this.fixedTicksPerUpdate = Math.max(1, ticksPerUpdate | 0);
   }
 
+  setReplayMode(enabled: boolean, useFixedTicks = true) {
+    this.autoRecordInputs = !enabled;
+    this.setFixedTickMode(enabled && useFixedTicks, 1);
+    if (enabled) {
+      this.inputRecord = null;
+      this.replayInputStartTick = 0;
+    } else {
+      this.inputFeed = null;
+      this.inputFeedIndex = 0;
+      this.replayInputStartTick = null;
+    }
+  }
+
   startInputRecording() {
     this.inputRecord = [];
   }
@@ -459,6 +479,21 @@ export class Game {
     const record = this.inputRecord;
     this.inputRecord = null;
     return record;
+  }
+
+  exportReplay(note?: string, hashes?: number[]): ReplayData | null {
+    if (!this.stage || !this.inputRecord) {
+      return null;
+    }
+    return createReplayData(
+      this.gameSource,
+      this.stage.stageId,
+      this.inputRecord.length,
+      this.inputStartTick,
+      this.inputRecord.slice(),
+      hashes,
+      note,
+    );
   }
 
   init() {
@@ -1228,6 +1263,7 @@ export class Game {
       this.stageRuntime = new StageRuntime(stage);
       this.simTick = 0;
       this.inputFeedIndex = 0;
+      this.inputStartTick = 0;
       this.animGroupTransforms = this.stageRuntime.animGroups.map((group) => group.transform);
       this.interpolatedAnimGroupTransforms = null;
       this.bananaGroups = new Array(this.stage.animGroupCount);
@@ -1267,6 +1303,9 @@ export class Game {
       this.hurryUpAnnouncerPlayed = false;
       this.timeOverAnnouncerPlayed = false;
       this.pendingAdvance = false;
+      if (this.autoRecordInputs) {
+        this.startInputRecording();
+      }
 
       this.resetBallForStage({ withIntro: true });
 
@@ -1753,20 +1792,32 @@ export class Game {
 
   private readDeterministicStick(inputEnabled: boolean) {
     let frame = null;
-    if (this.inputFeed && this.inputFeedIndex < this.inputFeed.length) {
-      frame = this.inputFeed[this.inputFeedIndex];
+    const canConsumeReplay = this.replayInputStartTick === null || this.simTick >= this.replayInputStartTick;
+    if (this.inputFeed && canConsumeReplay) {
+      frame = this.inputFeed[this.inputFeedIndex] ?? { x: 0, y: 0 };
       this.inputFeedIndex += 1;
     }
+
     if (!inputEnabled) {
       return { x: 0, y: 0 };
     }
+
+    if (this.inputRecord && this.autoRecordInputs) {
+      if (this.inputRecord.length === 0) {
+        this.inputStartTick = this.simTick;
+      }
+      if (!frame) {
+        const raw = this.input?.getStick?.() ?? { x: 0, y: 0 };
+        frame = quantizeStick(raw);
+      }
+      this.inputRecord.push({ x: frame.x, y: frame.y });
+    }
+
     if (!frame) {
       const raw = this.input?.getStick?.() ?? { x: 0, y: 0 };
       frame = quantizeStick(raw);
-      if (this.inputRecord) {
-        this.inputRecord.push({ x: frame.x, y: frame.y });
-      }
     }
+
     return dequantizeStick(frame);
   }
 

@@ -33,6 +33,7 @@ import { StageId, STAGE_INFO_MAP } from './noclip/SuperMonkeyBall/StageInfo.js';
 import type { StageData } from './noclip/SuperMonkeyBall/World.js';
 import { convertSmb2StageDef, getMb2wsStageInfo, getSmb2StageInfo } from './smb2_render.js';
 import { HudRenderer } from './hud.js';
+import type { ReplayData } from './replay.js';
 import {
   fetchPackSlice,
   getActivePack,
@@ -213,6 +214,10 @@ const packLoadFolderButton = document.getElementById('pack-load-folder') as HTML
 const packStatus = document.getElementById('pack-status') as HTMLElement | null;
 const packFileInput = document.getElementById('pack-file') as HTMLInputElement | null;
 const packFolderInput = document.getElementById('pack-folder') as HTMLInputElement | null;
+const replaySaveButton = document.getElementById('replay-save') as HTMLButtonElement | null;
+const replayLoadButton = document.getElementById('replay-load') as HTMLButtonElement | null;
+const replayFileInput = document.getElementById('replay-file') as HTMLInputElement | null;
+const replayStatus = document.getElementById('replay-status') as HTMLElement | null;
 const smb1Fields = document.getElementById('smb1-fields') as HTMLElement;
 const smb2Fields = document.getElementById('smb2-fields') as HTMLElement;
 const smb2ModeSelect = document.getElementById('smb2-mode') as HTMLSelectElement;
@@ -868,12 +873,62 @@ async function startStage(
     hudStatus.textContent = '';
   }
 
+  game.setReplayMode(false);
   game.setGameSource(activeGameSource);
   game.stageBasePath = getStageBasePath(activeGameSource);
   currentSmb2LikeMode =
     activeGameSource !== GAME_SOURCES.SMB1 && hasSmb2LikeMode(difficulty) ? difficulty.mode : null;
   void audio.resume();
   await game.start(difficulty);
+}
+
+function setReplayStatus(text: string) {
+  if (replayStatus) {
+    replayStatus.textContent = text;
+  }
+}
+
+async function startReplay(replay: ReplayData) {
+  setOverlayVisible(false);
+  resumeButton.disabled = true;
+  if (hudStatus) {
+    hudStatus.textContent = '';
+  }
+  game.setReplayMode(true, true);
+  game.setGameSource(replay.gameSource);
+  game.stageBasePath = getStageBasePath(replay.gameSource);
+  currentSmb2LikeMode = null;
+  game.course = null;
+  void audio.resume();
+  await game.loadStage(replay.stageId);
+  if (game.ball && game.stage) {
+    const startTick = Math.max(0, replay.inputStartTick ?? 0);
+    game.introTotalFrames = startTick;
+    game.introTimerFrames = startTick;
+    game.cameraController?.initForStage(game.ball, game.ball.startRotY, game.stageRuntime);
+  }
+  game.replayInputStartTick = Math.max(0, replay.inputStartTick ?? 0);
+  game.setInputFeed(replay.inputs);
+  game.paused = false;
+  while (game.simTick < game.replayInputStartTick) {
+    game.update(game.fixedStep);
+  }
+  game.setFixedTickMode(false, 1);
+  setReplayStatus(`Replay loaded (stage ${replay.stageId})`);
+}
+
+function downloadReplay(replay: ReplayData) {
+  const label = String(replay.stageId).padStart(3, '0');
+  const filename = `replay_${replay.gameSource}_st${label}.json`;
+  const blob = new Blob([JSON.stringify(replay, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function bindVolumeControl(
@@ -1400,6 +1455,43 @@ packFolderInput?.addEventListener('change', async () => {
     if (hudStatus) {
       hudStatus.textContent = 'Failed to load pack.';
     }
+  }
+});
+
+replaySaveButton?.addEventListener('click', () => {
+  if (!game || !game.stage) {
+    setReplayStatus('Replay: no stage active');
+    return;
+  }
+  const replay = game.exportReplay();
+  if (!replay) {
+    setReplayStatus('Replay: no inputs recorded');
+    return;
+  }
+  downloadReplay(replay);
+  setReplayStatus(`Replay saved (stage ${replay.stageId})`);
+});
+
+replayLoadButton?.addEventListener('click', () => {
+  replayFileInput?.click();
+});
+
+replayFileInput?.addEventListener('change', async () => {
+  const file = replayFileInput.files?.[0];
+  replayFileInput.value = '';
+  if (!file) {
+    return;
+  }
+  try {
+    const text = await file.text();
+    const replay = JSON.parse(text) as ReplayData;
+    if (!replay || replay.version !== 1 || !Array.isArray(replay.inputs)) {
+      throw new Error('Invalid replay');
+    }
+    await startReplay(replay);
+  } catch (error) {
+    console.error(error);
+    setReplayStatus('Replay: failed to load');
   }
 });
 
